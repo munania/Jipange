@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:locallists/features/lists/task_details.dart';
 import 'package:locallists/utils/theme.dart';
 
-import '../../data/taskDatabaseHelper.dart';
+import '../../data/task_database_helper.dart';
 
 class Homepage extends StatefulWidget {
   const Homepage({super.key});
@@ -33,23 +34,25 @@ class _HomepageState extends State<Homepage> {
   }
 
   // Insert a new task into the database
-  Future<void> _insertTask(String title) async {
-    final task = {'title': title, 'done': false};
-
-    await TaskDatabaseHelper.instance.insertTask(task);
+  Future<void> _insertTask(Map<String, dynamic> taskData) async {
+    await TaskDatabaseHelper.instance.insertTask(taskData);
     await _loadTasks();
   }
 
   // Update task completion status
-  Future<void> _updateTaskStatus(int id, bool done) async {
-    await TaskDatabaseHelper.instance.updateTaskStatus(id, done);
+  Future<void> _updateTask(int id, Map<String, dynamic> taskData) async {
+    await TaskDatabaseHelper.instance.updateTaskTitle(id, taskData['title']);
+    if (taskData['due_date'] != null) {
+      await TaskDatabaseHelper.instance
+          .updateTaskDueDate(id, taskData['due_date']);
+    }
     await _loadTasks();
   }
 
-  // Update task title
-  Future<void> _updateTaskTitle(int id, String title) async {
-    await TaskDatabaseHelper.instance.updateTaskTitle(id, title);
-    await _loadTasks(); // Reload tasks after the update
+  // Update task status
+  Future<void> _updateTaskStatus(int id, bool done) async {
+    await TaskDatabaseHelper.instance.updateTaskStatus(id, done);
+    await _loadTasks();
   }
 
   // Delete a task
@@ -58,88 +61,151 @@ class _HomepageState extends State<Homepage> {
     await _loadTasks();
   }
 
+  // Date picker
+  Future<DateTime?> _showDatePicker() async {
+    final now = DateTime.now();
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
+    // Define custom colors
+    final primaryColor =
+        isDarkMode ? AppThemes.lightSecondary : AppThemes.darkPrimary;
+
+    return showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 10),
+      switchToInputEntryModeIcon: const Icon(Icons.calendar_today),
+      switchToCalendarEntryModeIcon: const Icon(Icons.calendar_today),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme(
+              brightness: isDarkMode ? Brightness.dark : Brightness.light,
+              primary: primaryColor,
+              onPrimary: isDarkMode ? AppThemes.darkSurface : Colors.white,
+              secondary: primaryColor,
+              onSecondary: Colors.white,
+              error: Colors.red,
+              onError: Colors.white,
+              surface: isDarkMode ? AppThemes.darkSurface : Colors.white,
+              onSurface: isDarkMode ? Colors.white : Colors.black87,
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: primaryColor, // Cancel and OK button color
+              ),
+            ),
+            dialogTheme: DialogThemeData(
+                backgroundColor:
+                    isDarkMode ? AppThemes.darkSurface : Colors.white),
+          ),
+          child: child!,
+        );
+      },
+    );
+  }
+
+  // Format date
+  String _formatDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year.toString().substring(2)}';
+  }
+
   // Show bottom sheet to add a new task
   void _showAddTaskBottomSheet({Map<String, dynamic>? task}) {
-    // Existing implementation remains the same
+    DateTime? selectedDate;
     if (task != null) {
-      _taskController.text =
-          task['title']; // Pre-fill the controller for editing
+      _taskController.text = task['title'];
+      selectedDate =
+          task['due_date'] != null ? DateTime.parse(task['due_date']) : null;
     } else {
-      _taskController.clear(); // Clear the controller for adding
+      _taskController.clear();
     }
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (BuildContext context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            left: 16,
-            right: 16,
-            top: 16,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(height: 20),
-              TextField(
-                cursorColor: isDarkMode(context)
-                    ? AppThemes.lightSecondary
-                    : AppThemes.darkPrimary,
-                controller: _taskController,
-                decoration: InputDecoration(
-                  labelText: task != null ? 'Edit task' : 'Enter a new task',
-                  labelStyle: TextStyle(
-                      color: isDarkMode(context)
-                          ? AppThemes.lightSecondary
-                          : AppThemes.darkPrimary),
-                  hintText: task != null ? 'Update task title' : 'My task',
-                  border: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.black),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.black, width: 2.0),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.black),
-                  ),
-                ),
-                autofocus: true,
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+                left: 16,
+                right: 16,
+                top: 16,
               ),
-              SizedBox(height: 20),
-              Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        if (_taskController.text.isNotEmpty) {
-                          if (task == null) {
-                            // Add a new task
-                            await _insertTask(_taskController.text);
-                          } else {
-                            // Update an existing task
-                            await _updateTaskTitle(
-                                task['id'], _taskController.text);
-                          }
-                          _taskController.clear();
-                          Navigator.pop(context);
-                        }
-                      },
-                      child: Text(
-                        task != null ? 'Save Changes' : 'Add Task',
-                        style: TextStyle(
-                            color: isDarkMode(context)
-                                ? AppThemes.lightSecondary
-                                : AppThemes.lightSecondary),
-                      ),
+                  TextField(
+                    cursorColor: isDarkMode(context)
+                        ? AppThemes.lightSecondary
+                        : AppThemes.darkPrimary,
+                    controller: _taskController,
+                    decoration: InputDecoration(
+                      labelText:
+                          task != null ? 'Edit task' : 'Enter a new task',
+                      labelStyle: TextStyle(
+                          color: isDarkMode(context)
+                              ? AppThemes.lightSecondary
+                              : AppThemes.darkPrimary),
+                      hintText: task != null ? 'Update task title' : 'My task',
+                      border: OutlineInputBorder(),
                     ),
+                    autofocus: true,
                   ),
+                  SizedBox(height: 16),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final date = await _showDatePicker();
+                          if (date != null) {
+                            setState(() => selectedDate = date);
+                          }
+                        },
+                        icon: Icon(Icons.calendar_today, color: Colors.grey),
+                        label: Text(
+                          selectedDate != null
+                              ? 'Due: ${_formatDate(selectedDate!)}'
+                              : 'Set Due Date',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () async {
+                      if (_taskController.text.isNotEmpty) {
+                        final taskData = {
+                          'title': _taskController.text,
+                          'done': false,
+                          'due_date': selectedDate?.toIso8601String(),
+                        };
+                        // Capture the current context
+                        final currentContext = context;
+                        if (task == null) {
+                          await _insertTask(taskData);
+                        } else {
+                          await _updateTask(task['id'], taskData);
+                        }
+                        _taskController.clear();
+
+                        // Use the captured context
+                        if (currentContext.mounted) {
+                          Navigator.pop(currentContext);
+                        }
+                      }
+                    },
+                    child: Text(task != null ? 'Save Changes' : 'Add Task'),
+                  ),
+                  SizedBox(height: 16),
                 ],
               ),
-              SizedBox(height: 16),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -191,53 +257,107 @@ class _HomepageState extends State<Homepage> {
                             task: task); // Open bottom sheet for editing
                         return false; // Do not dismiss
                       } else if (direction == DismissDirection.endToStart) {
-                        await _deleteTask(task['id']);
-                        return true; // Confirm delete
+                        // Store the context's mounted status before the async gap
+                        if (!context.mounted) return false;
+
+                        // Show dialog and await the result
+                        final bool? shouldDelete = await showDialog<bool>(
+                          context: context,
+                          builder: (BuildContext context) => AlertDialog(
+                            title: Text('Delete Task'),
+                            content: Text(
+                                'Are you sure you want to delete this task?'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: Text(
+                                  'Cancel',
+                                  style: TextStyle(color: Colors.grey),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: Text('Delete',
+                                    style: TextStyle(color: Colors.red)),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (shouldDelete == true) {
+                          // Check if context is still mounted before proceeding
+                          if (!context.mounted) return false;
+                          await _deleteTask(task['id']);
+                          return true; // Confirm delete
+                        }
                       }
                       return false;
                     },
-                    child: Card(
-                      key: ValueKey(task['id']),
-                      margin: EdgeInsets.symmetric(vertical: 8),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16.0),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                task['title'],
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  decoration: task['done']
-                                      ? TextDecoration.lineThrough
-                                      : TextDecoration.none,
+                    child: GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => TaskDetails(
+                              taskTitle: task['title'],
+                              taskId: task['id'],
+                            ),
+                          ),
+                        );
+                      },
+                      child: Card(
+                        key: ValueKey(task['id']),
+                        margin: EdgeInsets.symmetric(vertical: 8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      task['title'],
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        decoration: task['done']
+                                            ? TextDecoration.lineThrough
+                                            : TextDecoration.none,
+                                      ),
+                                    ),
+                                    if (task['due_date'] != null) ...[
+                                      SizedBox(height: 4),
+                                      Text(
+                                        'Due: ${_formatDate(DateTime.parse(task['due_date']))}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ),
-                            ),
-                            SizedBox(
-                              width: 20,
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                _updateTaskStatus(task['id'], !task['done']);
-                              },
-                              child: Icon(
-                                task['done']
-                                    ? Icons.check_circle
-                                    : Icons.radio_button_unchecked,
-                                color: task['done']
-                                    ? isDarkMode(context)
-                                        ? AppThemes.lightSecondary
-                                        : AppThemes.darkSurface
-                                    : isDarkMode(context)
-                                        ? AppThemes.lightSecondary
-                                        : AppThemes.darkPrimary,
+                              GestureDetector(
+                                onTap: () => _updateTaskStatus(
+                                    task['id'], !task['done']),
+                                child: Icon(
+                                  task['done']
+                                      ? Icons.check_circle
+                                      : Icons.radio_button_unchecked,
+                                  color: task['done']
+                                      ? isDarkMode(context)
+                                          ? AppThemes.lightSecondary
+                                          : AppThemes.darkSurface
+                                      : isDarkMode(context)
+                                          ? AppThemes.lightSecondary
+                                          : AppThemes.darkPrimary,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
