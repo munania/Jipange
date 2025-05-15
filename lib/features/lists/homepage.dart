@@ -199,7 +199,11 @@ class _HomepageState extends State<Homepage> {
                         }
                       }
                     },
-                    child: Text(task != null ? 'Save Changes' : 'Add Task'),
+                    child: Text(task != null ? 'Save Changes' : 'Add Task',
+                        style: TextStyle(
+                            color: isDarkMode(context)
+                                ? AppThemes.darkPrimary
+                                : AppThemes.lightSecondary)),
                   ),
                   SizedBox(height: 16),
                 ],
