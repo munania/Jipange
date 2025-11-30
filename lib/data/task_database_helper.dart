@@ -19,13 +19,15 @@ class TaskDatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3, // Increased version number for schema changes
+      version: 5, // Bumped to 5 to ensure migration runs
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    print('Upgrading database from $oldVersion to $newVersion');
+
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE tasks ADD COLUMN due_date TEXT');
     }
@@ -48,6 +50,57 @@ class TaskDatabaseHelper {
       // Enable foreign keys
       await db.execute('PRAGMA foreign_keys = ON');
     }
+
+    // Combined migration for v4 and v5 to ensure schema is correct
+    if (oldVersion < 5) {
+      // Add category_id to tasks table
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN category_id INTEGER');
+        print('Added category_id column');
+      } catch (e) {
+        print('Error adding category_id (might already exist): $e');
+      }
+
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN position INTEGER');
+        print('Added position column');
+      } catch (e) {
+        print('Error adding position (might already exist): $e');
+      }
+
+      // Create categories table
+      try {
+        await db.execute('''
+          CREATE TABLE categories(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            color INTEGER,
+            icon INTEGER
+          )
+        ''');
+        print('Created categories table');
+
+        // Insert default categories only if table was just created
+        await db.insert('categories', {
+          'name': 'Work',
+          'color': 0xFF2196F3, // Colors.blue.value
+          'icon': 58136, // Icons.work.codePoint
+        });
+        await db.insert('categories', {
+          'name': 'Personal',
+          'color': 0xFF4CAF50, // Colors.green.value
+          'icon': 59389, // Icons.person.codePoint
+        });
+        await db.insert('categories', {
+          'name': 'Shopping',
+          'color': 0xFFFF9800, // Colors.orange.value
+          'icon': 58780, // Icons.shopping_cart.codePoint
+        });
+        print('Inserted default categories');
+      } catch (e) {
+        print('Error creating categories table (might already exist): $e');
+      }
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -61,7 +114,9 @@ class TaskDatabaseHelper {
         title TEXT, 
         details TEXT,
         done INTEGER,
-        due_date TEXT
+        due_date TEXT,
+        category_id INTEGER,
+        position INTEGER
       )
     ''');
 
@@ -75,6 +130,33 @@ class TaskDatabaseHelper {
         FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
       )
     ''');
+
+    // Create categories table
+    await db.execute('''
+      CREATE TABLE categories(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        color INTEGER,
+        icon INTEGER
+      )
+    ''');
+
+    // Insert default categories
+    await db.insert('categories', {
+      'name': 'Work',
+      'color': 0xFF2196F3, // Colors.blue.value
+      'icon': 58136, // Icons.work.codePoint
+    });
+    await db.insert('categories', {
+      'name': 'Personal',
+      'color': 0xFF4CAF50, // Colors.green.value
+      'icon': 59389, // Icons.person.codePoint
+    });
+    await db.insert('categories', {
+      'name': 'Shopping',
+      'color': 0xFFFF9800, // Colors.orange.value
+      'icon': 58780, // Icons.shopping_cart.codePoint
+    });
   }
 
   /// Task CRUD Operations
@@ -89,15 +171,34 @@ class TaskDatabaseHelper {
         'details': task['details'],
         'done': task['done'] ? 1 : 0,
         'due_date': task['due_date'],
+        'category_id': task['category_id'],
+        'position': task['position'],
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
   // Read all tasks
-  Future<List<Map<String, dynamic>>> getAllTasks() async {
+  Future<List<Map<String, dynamic>>> getAllTasks({
+    String? searchQuery,
+    String? orderBy,
+  }) async {
     final db = await instance.database;
-    final List<Map<String, dynamic>> tasks = await db.query('tasks');
+
+    String? where;
+    List<dynamic>? whereArgs;
+
+    if (searchQuery != null && searchQuery.isNotEmpty) {
+      where = 'title LIKE ? OR details LIKE ?';
+      whereArgs = ['%$searchQuery%', '%$searchQuery%'];
+    }
+
+    final List<Map<String, dynamic>> tasks = await db.query(
+      'tasks',
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: orderBy,
+    );
 
     return tasks
         .map((task) => {
@@ -106,6 +207,8 @@ class TaskDatabaseHelper {
               'details': task['details'],
               'done': task['done'] == 1,
               'due_date': task['due_date'],
+              'category_id': task['category_id'],
+              'position': task['position'],
             })
         .toList();
   }
@@ -139,6 +242,8 @@ class TaskDatabaseHelper {
       'details': tasks.first['details'],
       'done': tasks.first['done'] == 1,
       'due_date': tasks.first['due_date'],
+      'category_id': tasks.first['category_id'],
+      'position': tasks.first['position'],
       'subtasks': subtasks
           .map((subtask) => {
                 'id': subtask['id'],
@@ -205,6 +310,8 @@ class TaskDatabaseHelper {
         'details': task['details'],
         'done': task['done'] ? 1 : 0,
         'due_date': task['due_date'],
+        'category_id': task['category_id'],
+        'position': task['position'],
       },
       where: 'id = ?',
       whereArgs: [task['id']],
@@ -223,7 +330,7 @@ class TaskDatabaseHelper {
 
   /// Subtask CRUD Operations
 
-  // Create a new subtask
+  // Create (Insert) a new subtask
   Future<int> insertSubtask(Map<String, dynamic> subtask) async {
     final db = await instance.database;
     return await db.insert(
@@ -316,6 +423,8 @@ class TaskDatabaseHelper {
             'details': task['details'],
             'done': task['done'] ? 1 : 0,
             'due_date': task['due_date'],
+            'category_id': task['category_id'],
+            'position': task['position'],
           },
           where: 'id = ?',
           whereArgs: [taskId],
@@ -329,6 +438,8 @@ class TaskDatabaseHelper {
             'details': task['details'],
             'done': task['done'] ? 1 : 0,
             'due_date': task['due_date'],
+            'category_id': task['category_id'],
+            'position': task['position'],
           },
         );
       }
@@ -388,9 +499,57 @@ class TaskDatabaseHelper {
     });
   }
 
+  // CRUD for Categories
+
+  Future<int> createCategory(Map<String, dynamic> category) async {
+    final db = await instance.database;
+    return await db.insert('categories', category);
+  }
+
+  Future<List<Map<String, dynamic>>> getAllCategories() async {
+    final db = await instance.database;
+    return await db.query('categories');
+  }
+
+  Future<int> updateCategory(Map<String, dynamic> category) async {
+    final db = await instance.database;
+    return await db.update(
+      'categories',
+      category,
+      where: 'id = ?',
+      whereArgs: [category['id']],
+    );
+  }
+
+  Future<int> deleteCategory(int id) async {
+    final db = await instance.database;
+    // Update tasks to remove category reference before deleting
+    await db.update('tasks', {'category_id': null},
+        where: 'category_id = ?', whereArgs: [id]);
+    return await db.delete('categories', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Update task positions for reordering
+  Future<void> updateTaskPositions(List<Map<String, dynamic>> tasks) async {
+    final db = await instance.database;
+    await db.transaction((txn) async {
+      for (var task in tasks) {
+        await txn.update(
+          'tasks',
+          {'position': task['position']},
+          where: 'id = ?',
+          whereArgs: [task['id']],
+        );
+      }
+    });
+  }
+
   // Close the database
   Future<void> closeDatabase() async {
-    final db = await instance.database;
-    await db.close();
+    final db = _database;
+    if (db != null) {
+      await db.close();
+      _database = null;
+    }
   }
 }

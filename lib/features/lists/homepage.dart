@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:locallists/features/lists/task_details.dart';
+import 'package:locallists/features/lists/widgets/add_task_sheet.dart';
+import 'package:locallists/features/lists/widgets/task_list_item.dart';
+import 'package:locallists/features/settings/settings.dart';
+import 'package:locallists/services/notification_service.dart';
 import 'package:locallists/utils/theme.dart';
 
 import '../../data/task_database_helper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Homepage extends StatefulWidget {
   const Homepage({super.key});
@@ -11,13 +16,49 @@ class Homepage extends StatefulWidget {
   State<Homepage> createState() => _HomepageState();
 }
 
+enum SortOption { custom, dateCreated, dueDate, alphabetical }
+
 class _HomepageState extends State<Homepage> {
   List<Map<String, dynamic>> userTasks = [];
-  final TextEditingController _taskController = TextEditingController();
+  Map<int, Map<String, dynamic>> _categoriesMap = {};
+  bool _showCompleted = true;
+  bool _isSearching = false;
+  String _searchQuery = '';
+  SortOption _currentSortOption = SortOption.custom;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    _loadPreferences();
+  }
+
+  Future<void> _loadPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _showCompleted = prefs.getBool('showCompleted') ?? true;
+    });
+    _loadCategories();
+    _loadTasks();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final categories = await TaskDatabaseHelper.instance.getAllCategories();
+      setState(() {
+        _categoriesMap = {for (var c in categories) c['id']: c};
+      });
+    } catch (e) {
+      debugPrint('Error loading categories: $e');
+    }
+  }
+
+  Future<void> _toggleShowCompleted() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _showCompleted = !_showCompleted;
+    });
+    await prefs.setBool('showCompleted', _showCompleted);
     _loadTasks();
   }
 
@@ -27,24 +68,85 @@ class _HomepageState extends State<Homepage> {
 
   // Load tasks from the database
   Future<void> _loadTasks() async {
-    final tasks = await TaskDatabaseHelper.instance.getAllTasks();
-    setState(() {
-      userTasks = tasks;
-    });
+    String? orderBy;
+    switch (_currentSortOption) {
+      case SortOption.dateCreated:
+        orderBy = 'id DESC';
+        break;
+      case SortOption.dueDate:
+        orderBy = 'due_date ASC';
+        break;
+      case SortOption.alphabetical:
+        orderBy = 'title ASC';
+        break;
+      case SortOption.custom:
+        orderBy = 'position ASC';
+        break;
+    }
+
+    try {
+      final tasks = await TaskDatabaseHelper.instance.getAllTasks(
+        searchQuery: _searchQuery,
+        orderBy: orderBy,
+      );
+
+      setState(() {
+        if (_showCompleted) {
+          userTasks = tasks;
+        } else {
+          userTasks = tasks.where((t) => t['done'] == false).toList();
+        }
+      });
+    } catch (e) {
+      debugPrint('Error loading tasks: $e');
+      // Fallback to ID sort if position fails (likely due to missing column)
+      if (orderBy == 'position ASC') {
+        try {
+          final tasks = await TaskDatabaseHelper.instance.getAllTasks(
+            searchQuery: _searchQuery,
+            orderBy: 'id DESC',
+          );
+          setState(() {
+            if (_showCompleted) {
+              userTasks = tasks;
+            } else {
+              userTasks = tasks.where((t) => t['done'] == false).toList();
+            }
+          });
+        } catch (e2) {
+          debugPrint('Error loading tasks fallback: $e2');
+        }
+      }
+    }
   }
 
   // Insert a new task into the database
   Future<void> _insertTask(Map<String, dynamic> taskData) async {
-    await TaskDatabaseHelper.instance.insertTask(taskData);
+    final id = await TaskDatabaseHelper.instance.insertTask(taskData);
+    if (taskData['due_date'] != null) {
+      await NotificationService.instance.scheduleTaskNotification(
+        taskId: id,
+        taskTitle: taskData['title'],
+        dueDateTime: DateTime.parse(taskData['due_date']),
+      );
+    }
     await _loadTasks();
   }
 
-  // Update task completion status
+  // Update task details
   Future<void> _updateTask(int id, Map<String, dynamic> taskData) async {
     await TaskDatabaseHelper.instance.updateTaskTitle(id, taskData['title']);
     if (taskData['due_date'] != null) {
       await TaskDatabaseHelper.instance
           .updateTaskDueDate(id, taskData['due_date']);
+
+      // Reschedule notification
+      await NotificationService.instance.cancelTaskNotification(id);
+      await NotificationService.instance.scheduleTaskNotification(
+        taskId: id,
+        taskTitle: taskData['title'],
+        dueDateTime: DateTime.parse(taskData['due_date']),
+      );
     }
     await _loadTasks();
   }
@@ -52,163 +154,47 @@ class _HomepageState extends State<Homepage> {
   // Update task status
   Future<void> _updateTaskStatus(int id, bool done) async {
     await TaskDatabaseHelper.instance.updateTaskStatus(id, done);
+    if (done) {
+      await NotificationService.instance.cancelTaskNotification(id);
+    } else {
+      // Re-schedule if unchecked? We'd need the due date.
+      // For now, let's just cancel if done.
+      // Ideally we should fetch the task to get the due date if we want to reschedule.
+      final task = await TaskDatabaseHelper.instance.getTaskWithSubtasks(id);
+      if (task != null && task['due_date'] != null) {
+        await NotificationService.instance.scheduleTaskNotification(
+          taskId: id,
+          taskTitle: task['title'],
+          dueDateTime: DateTime.parse(task['due_date']),
+        );
+      }
+    }
     await _loadTasks();
   }
 
   // Delete a task
   Future<void> _deleteTask(int id) async {
     await TaskDatabaseHelper.instance.deleteTask(id);
+    await NotificationService.instance.cancelTaskNotification(id);
     await _loadTasks();
-  }
-
-  // Date picker
-  Future<DateTime?> _showDatePicker() async {
-    final now = DateTime.now();
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
-    // Define custom colors
-    final primaryColor =
-        isDarkMode ? AppThemes.lightSecondary : AppThemes.darkPrimary;
-
-    return showDatePicker(
-      context: context,
-      initialDate: now,
-      firstDate: DateTime(now.year - 10),
-      lastDate: DateTime(now.year + 10),
-      switchToInputEntryModeIcon: const Icon(Icons.calendar_today),
-      switchToCalendarEntryModeIcon: const Icon(Icons.calendar_today),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme(
-              brightness: isDarkMode ? Brightness.dark : Brightness.light,
-              primary: primaryColor,
-              onPrimary: isDarkMode ? AppThemes.darkSurface : Colors.white,
-              secondary: primaryColor,
-              onSecondary: Colors.white,
-              error: Colors.red,
-              onError: Colors.white,
-              surface: isDarkMode ? AppThemes.darkSurface : Colors.white,
-              onSurface: isDarkMode ? Colors.white : Colors.black87,
-            ),
-            textButtonTheme: TextButtonThemeData(
-              style: TextButton.styleFrom(
-                foregroundColor: primaryColor, // Cancel and OK button color
-              ),
-            ),
-            dialogTheme: DialogThemeData(
-                backgroundColor:
-                    isDarkMode ? AppThemes.darkSurface : Colors.white),
-          ),
-          child: child!,
-        );
-      },
-    );
-  }
-
-  // Format date
-  String _formatDate(DateTime date) {
-    return '${date.day.toString().padLeft(2, '0')}-${date.month.toString().padLeft(2, '0')}-${date.year.toString().substring(2)}';
   }
 
   // Show bottom sheet to add a new task
   void _showAddTaskBottomSheet({Map<String, dynamic>? task}) {
-    DateTime? selectedDate;
-    if (task != null) {
-      _taskController.text = task['title'];
-      selectedDate =
-          task['due_date'] != null ? DateTime.parse(task['due_date']) : null;
-    } else {
-      _taskController.clear();
-    }
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (BuildContext context, StateSetter setState) {
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-                left: 16,
-                right: 16,
-                top: 16,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    cursorColor: isDarkMode(context)
-                        ? AppThemes.lightSecondary
-                        : AppThemes.darkPrimary,
-                    controller: _taskController,
-                    decoration: InputDecoration(
-                      labelText:
-                          task != null ? 'Edit task' : 'Enter a new task',
-                      labelStyle: TextStyle(
-                          color: isDarkMode(context)
-                              ? AppThemes.lightSecondary
-                              : AppThemes.darkPrimary),
-                      hintText: task != null ? 'Update task title' : 'My task',
-                      border: OutlineInputBorder(),
-                    ),
-                    autofocus: true,
-                  ),
-                  SizedBox(height: 16),
-                  Row(
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final date = await _showDatePicker();
-                          if (date != null) {
-                            setState(() => selectedDate = date);
-                          }
-                        },
-                        icon: Icon(Icons.calendar_today, color: Colors.grey),
-                        label: Text(
-                          selectedDate != null
-                              ? 'Due: ${_formatDate(selectedDate!)}'
-                              : 'Set Due Date',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () async {
-                      if (_taskController.text.isNotEmpty) {
-                        final taskData = {
-                          'title': _taskController.text,
-                          'done': false,
-                          'due_date': selectedDate?.toIso8601String(),
-                        };
-                        // Capture the current context
-                        final currentContext = context;
-                        if (task == null) {
-                          await _insertTask(taskData);
-                        } else {
-                          await _updateTask(task['id'], taskData);
-                        }
-                        _taskController.clear();
-
-                        // Use the captured context
-                        if (currentContext.mounted) {
-                          Navigator.pop(currentContext);
-                        }
-                      }
-                    },
-                    child: Text(task != null ? 'Save Changes' : 'Add Task',
-                        style: TextStyle(
-                            color: isDarkMode(context)
-                                ? AppThemes.lightSecondary
-                                : AppThemes.lightSecondary)),
-                  ),
-                  SizedBox(height: 16),
-                ],
-              ),
-            );
+        return AddTaskSheet(
+          task: task,
+          categoriesMap: _categoriesMap,
+          isDarkMode: isDarkMode(context),
+          onSave: (taskData) async {
+            if (task == null) {
+              await _insertTask(taskData);
+            } else {
+              await _updateTask(task['id'], taskData);
+            }
           },
         );
       },
@@ -217,9 +203,98 @@ class _HomepageState extends State<Homepage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       appBar: AppBar(
-        title: Text("Jipange"),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Search tasks...',
+                  border: InputBorder.none,
+                  hintStyle: TextStyle(color: Colors.grey),
+                ),
+                style: TextStyle(
+                  color: isDarkMode ? Colors.white : Colors.black,
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value;
+                  });
+                  _loadTasks();
+                },
+              )
+            : const Text("Jipange"),
+        actions: [
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                if (_isSearching) {
+                  _isSearching = false;
+                  _searchQuery = '';
+                  _searchController.clear();
+                  _loadTasks();
+                } else {
+                  _isSearching = true;
+                }
+              });
+            },
+          ),
+          PopupMenuButton<SortOption>(
+            icon: const Icon(Icons.sort),
+            tooltip: 'Sort by',
+            onSelected: (SortOption result) {
+              setState(() {
+                _currentSortOption = result;
+              });
+              _loadTasks();
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<SortOption>>[
+              const PopupMenuItem<SortOption>(
+                value: SortOption.custom,
+                child: Text('Custom Order'),
+              ),
+              const PopupMenuItem<SortOption>(
+                value: SortOption.dateCreated,
+                child: Text('Date Created (Newest)'),
+              ),
+              const PopupMenuItem<SortOption>(
+                value: SortOption.dueDate,
+                child: Text('Due Date (Soonest)'),
+              ),
+              const PopupMenuItem<SortOption>(
+                value: SortOption.alphabetical,
+                child: Text('Alphabetical (A-Z)'),
+              ),
+              const PopupMenuDivider(),
+            ],
+          ),
+          IconButton(
+            icon:
+                Icon(_showCompleted ? Icons.visibility : Icons.visibility_off),
+            tooltip: _showCompleted ? 'Hide Completed' : 'Show Completed',
+            onPressed: _toggleShowCompleted,
+          ),
+          IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () {
+                Future.delayed(
+                  const Duration(seconds: 0),
+                  () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SettingsScreen(),
+                    ),
+                  ).then((_) {
+                    _loadCategories(); // Reload categories after returning
+                    _loadTasks();
+                  }),
+                );
+              }),
+        ],
       ),
       body: SingleChildScrollView(
         child: Padding(
@@ -232,35 +307,20 @@ class _HomepageState extends State<Homepage> {
                 'Your Tasks',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
-              SizedBox(height: 16),
+              const SizedBox(height: 16),
               ReorderableListView.builder(
                 shrinkWrap: true,
-                physics: NeverScrollableScrollPhysics(),
+                physics: const NeverScrollableScrollPhysics(),
                 itemCount: userTasks.length,
                 itemBuilder: (context, index) {
                   final task = userTasks[index];
-                  return Dismissible(
+                  return TaskListItem(
                     key: ValueKey(task['id']),
-                    background: Container(
-                      color: Colors.blue,
-                      alignment: Alignment.centerLeft,
-                      padding: EdgeInsets.only(left: 20),
-                      child: Icon(Icons.edit, color: AppThemes.lightSecondary),
-                    ),
-                    secondaryBackground: Container(
-                      color: Colors.red,
-                      alignment: Alignment.centerRight,
-                      padding: EdgeInsets.only(right: 20),
-                      child:
-                          Icon(Icons.delete, color: AppThemes.lightSecondary),
-                    ),
-                    direction: DismissDirection.horizontal,
-                    confirmDismiss: (direction) async {
-                      if (direction == DismissDirection.startToEnd) {
-                        _showAddTaskBottomSheet(
-                            task: task); // Open bottom sheet for editing
-                        return false; // Do not dismiss
-                      } else if (direction == DismissDirection.endToStart) {
+                    task: task,
+                    categoriesMap: _categoriesMap,
+                    isDarkMode: isDarkMode,
+                    onDismiss: (direction) async {
+                      if (direction == DismissDirection.endToStart) {
                         // Store the context's mounted status before the async gap
                         if (!context.mounted) return false;
 
@@ -268,20 +328,20 @@ class _HomepageState extends State<Homepage> {
                         final bool? shouldDelete = await showDialog<bool>(
                           context: context,
                           builder: (BuildContext context) => AlertDialog(
-                            title: Text('Delete Task'),
-                            content: Text(
+                            title: const Text('Delete Task'),
+                            content: const Text(
                                 'Are you sure you want to delete this task?'),
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.pop(context, false),
-                                child: Text(
+                                child: const Text(
                                   'Cancel',
                                   style: TextStyle(color: Colors.grey),
                                 ),
                               ),
                               TextButton(
                                 onPressed: () => Navigator.pop(context, true),
-                                child: Text('Delete',
+                                child: const Text('Delete',
                                     style: TextStyle(color: Colors.red)),
                               ),
                             ],
@@ -297,77 +357,38 @@ class _HomepageState extends State<Homepage> {
                       }
                       return false;
                     },
-                    child: GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => TaskDetails(
-                              taskTitle: task['title'],
-                              taskId: task['id'],
-                            ),
-                          ),
-                        );
-                      },
-                      child: Card(
-                        key: ValueKey(task['id']),
-                        margin: EdgeInsets.symmetric(vertical: 8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      task['title'],
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        decoration: task['done']
-                                            ? TextDecoration.lineThrough
-                                            : TextDecoration.none,
-                                      ),
-                                    ),
-                                    if (task['due_date'] != null) ...[
-                                      SizedBox(height: 4),
-                                      Text(
-                                        'Due: ${_formatDate(DateTime.parse(task['due_date']))}',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => _updateTaskStatus(
-                                    task['id'], !task['done']),
-                                child: Icon(
-                                  task['done']
-                                      ? Icons.check_circle
-                                      : Icons.radio_button_unchecked,
-                                  color: task['done']
-                                      ? isDarkMode(context)
-                                          ? AppThemes.lightSecondary
-                                          : AppThemes.darkSurface
-                                      : isDarkMode(context)
-                                          ? AppThemes.lightSecondary
-                                          : AppThemes.darkPrimary,
-                                ),
-                              ),
-                            ],
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TaskDetails(
+                            taskTitle: task['title'],
+                            taskId: task['id'],
                           ),
                         ),
-                      ),
-                    ),
+                      );
+                      // Reload categories and tasks after returning from TaskDetails
+                      _loadCategories();
+                      _loadTasks();
+                    },
+                    onStatusToggle: () =>
+                        _updateTaskStatus(task['id'], !task['done']),
+                    onEdit: () => _showAddTaskBottomSheet(task: task),
                   );
                 },
                 onReorder: (int oldIndex, int newIndex) {
+                  // Prevent reordering if filtering is active or sorting is not custom or searching
+                  if (!_showCompleted ||
+                      _currentSortOption != SortOption.custom ||
+                      _searchQuery.isNotEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                          content: Text(
+                              'Cannot reorder when filtered, sorted, or searching')),
+                    );
+                    return;
+                  }
+
                   setState(() {
                     // Adjust newIndex if moving an item with a lower index to a higher index
                     if (oldIndex < newIndex) {
@@ -380,6 +401,17 @@ class _HomepageState extends State<Homepage> {
 
                     // Insert the item at the new index
                     userTasks.insert(newIndex, movedTask);
+
+                    // Update positions in database
+                    final updatedTasks = userTasks.asMap().entries.map((e) {
+                      return {
+                        'id': e.value['id'],
+                        'position': e.key,
+                      };
+                    }).toList();
+
+                    TaskDatabaseHelper.instance
+                        .updateTaskPositions(updatedTasks);
                   });
                 },
               ),
@@ -388,11 +420,10 @@ class _HomepageState extends State<Homepage> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor:
-            isDarkMode(context) ? AppThemes.darkSurface : AppThemes.darkPrimary,
-        onPressed: _showAddTaskBottomSheet,
+        backgroundColor: Colors.blue,
+        onPressed: () => _showAddTaskBottomSheet(),
         child: Icon(Icons.add,
-            color: isDarkMode(context)
+            color: isDarkMode
                 ? AppThemes.lightSecondary
                 : AppThemes.lightSecondary),
       ),
@@ -401,7 +432,7 @@ class _HomepageState extends State<Homepage> {
 
   @override
   void dispose() {
-    _taskController.dispose();
+    _searchController.dispose();
     TaskDatabaseHelper.instance.closeDatabase();
     super.dispose();
   }

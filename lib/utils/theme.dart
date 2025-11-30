@@ -38,7 +38,7 @@ class AppThemes {
       bodyMedium: TextStyle(color: lightTextSecondary),
     ),
     appBarTheme: AppBarTheme(
-      color: lightPrimary,
+      backgroundColor: lightPrimary,
       iconTheme: IconThemeData(color: lightTextPrimary),
       titleTextStyle: TextStyle(
           color: lightTextPrimary, fontSize: 20, fontWeight: FontWeight.bold),
@@ -73,7 +73,7 @@ class AppThemes {
       bodyMedium: TextStyle(color: darkTextSecondary),
     ),
     appBarTheme: AppBarTheme(
-      color: darkPrimary,
+      backgroundColor: darkPrimary,
       iconTheme: IconThemeData(color: darkTextPrimary),
       titleTextStyle: TextStyle(
           color: darkTextPrimary, fontSize: 20, fontWeight: FontWeight.bold),

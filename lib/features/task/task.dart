@@ -1,10 +1,13 @@
 class Task {
-  final int? id;
-  final String title;
-  final String? details;
-  final bool done;
-  final String? dueDate;
-  final List<Subtask> subtasks;
+  int? id;
+  String title;
+  String? details;
+  bool done;
+  DateTime? dueDate;
+  int? position;
+  int? categoryId;
+  int? notificationId;
+  List<Subtask> subtasks;
 
   Task({
     this.id,
@@ -12,100 +15,99 @@ class Task {
     this.details,
     this.done = false,
     this.dueDate,
+    this.position,
+    this.categoryId,
+    this.notificationId,
     this.subtasks = const [],
   });
 
-  // Convert Task to a Map for database operations
   Map<String, dynamic> toMap() {
     return {
-      if (id != null) 'id': id,
+      'id': id,
       'title': title,
       'details': details,
-      'done': done,
-      'due_date': dueDate,
-      'subtasks': subtasks.map((subtask) => subtask.toMap()).toList(),
+      'done': done ? 1 : 0,
+      'due_date': dueDate?.toIso8601String(),
+      'position': position,
+      'category_id': categoryId,
+      'notification_id': notificationId,
     };
   }
 
-  // Create Task from a database Map
   factory Task.fromMap(Map<String, dynamic> map) {
-    List<Subtask> subtasksList = [];
-
-    if (map.containsKey('subtasks')) {
-      subtasksList = (map['subtasks'] as List)
-          .map((subtaskMap) => Subtask.fromMap(subtaskMap))
-          .toList();
-    }
-
     return Task(
       id: map['id'],
       title: map['title'],
       details: map['details'],
-      done: map['done'] ?? false,
-      dueDate: map['due_date'],
-      subtasks: subtasksList,
-    );
-  }
-
-  // Create a copy of this Task with some fields updated
-  Task copyWith({
-    int? id,
-    String? title,
-    String? details,
-    bool? done,
-    String? dueDate,
-    List<Subtask>? subtasks,
-  }) {
-    return Task(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      details: details ?? this.details,
-      done: done ?? this.done,
-      dueDate: dueDate ?? this.dueDate,
-      subtasks: subtasks ?? this.subtasks,
+      done: map['done'] == 1,
+      dueDate: map['due_date'] != null ? DateTime.parse(map['due_date']) : null,
+      position: map['position'],
+      categoryId: map['category_id'],
+      notificationId: map['notification_id'],
     );
   }
 }
 
 class Subtask {
-  final int? id;
-  final String title;
-  final bool done;
+  int? id;
+  int? taskId;
+  String title;
+  bool done;
 
   Subtask({
     this.id,
+    this.taskId,
     required this.title,
     this.done = false,
   });
 
-  // Convert Subtask to a Map for database operations
   Map<String, dynamic> toMap() {
     return {
-      if (id != null) 'id': id,
+      'id': id,
+      'task_id': taskId,
       'title': title,
-      'done': done,
+      'done': done ? 1 : 0,
     };
   }
 
-  // Create Subtask from a database Map
   factory Subtask.fromMap(Map<String, dynamic> map) {
     return Subtask(
       id: map['id'],
+      taskId: map['task_id'],
       title: map['title'],
-      done: map['done'] ?? false,
+      done: map['done'] == 1,
     );
   }
+}
 
-  // Create a copy of this Subtask with some fields updated
-  Subtask copyWith({
-    int? id,
-    String? title,
-    bool? done,
-  }) {
-    return Subtask(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      done: done ?? this.done,
+class Category {
+  int? id;
+  String name;
+  int? color;
+  int? icon;
+
+  Category({
+    this.id,
+    required this.name,
+    this.color,
+    this.icon,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'color': color,
+      'icon': icon,
+    };
+  }
+
+  factory Category.fromMap(Map<String, dynamic> map) {
+    return Category(
+      id: map['id'],
+      name: map['name'],
+      color: map['color'],
+      icon: map['icon'],
     );
   }
 }
