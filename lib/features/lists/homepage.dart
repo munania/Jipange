@@ -200,7 +200,7 @@ class _HomepageState extends State<Homepage> {
     );
   }
 
-  // Show bottom sheet with sort/filter/show-completed options
+  // Show bottom sheet with sort/filter options
   void _showFilterSheet() {
     showModalBottomSheet(
       context: context,
@@ -213,7 +213,6 @@ class _HomepageState extends State<Homepage> {
           categoriesMap: _categoriesMap,
           currentSort: _currentSortOption,
           selectedCategoryIds: _selectedCategoryIds,
-          showCompleted: _showCompleted,
           isDarkMode: isDarkMode(context),
           onSortChanged: (sort) {
             setState(() => _currentSortOption = sort);
@@ -223,15 +222,17 @@ class _HomepageState extends State<Homepage> {
             setState(() => _selectedCategoryIds = categoryIds);
             _loadTasks();
           },
-          onShowCompletedChanged: (value) async {
-            final prefs = await SharedPreferences.getInstance();
-            setState(() => _showCompleted = value);
-            await prefs.setBool('showCompleted', value);
-            _loadTasks();
-          },
         );
       },
     );
+  }
+
+  // Toggle whether finished tasks are shown, persisted across launches
+  Future<void> _toggleShowCompleted() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => _showCompleted = !_showCompleted);
+    await prefs.setBool('showCompleted', _showCompleted);
+    _loadTasks();
   }
 
   @override
@@ -277,11 +278,16 @@ class _HomepageState extends State<Homepage> {
             },
           ),
           IconButton(
+            icon:
+                Icon(_showCompleted ? Icons.visibility : Icons.visibility_off),
+            tooltip: _showCompleted ? 'Hide finished tasks' : 'Show finished tasks',
+            onPressed: _toggleShowCompleted,
+          ),
+          IconButton(
             icon: Icon(
-              Icons.filter_list,
+              Icons.tune,
               color: _selectedCategoryIds.isNotEmpty ||
-                      _currentSortOption != SortOption.custom ||
-                      !_showCompleted
+                      _currentSortOption != SortOption.custom
                   ? (isDarkMode
                       ? AppThemes.lightSecondary
                       : AppThemes.darkPrimary)

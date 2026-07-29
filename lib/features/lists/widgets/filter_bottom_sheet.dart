@@ -6,10 +6,8 @@ class FilterBottomSheet extends StatefulWidget {
   final Map<int, Map<String, dynamic>> categoriesMap;
   final SortOption currentSort;
   final Set<int> selectedCategoryIds;
-  final bool showCompleted;
   final ValueChanged<SortOption> onSortChanged;
   final ValueChanged<Set<int>> onCategoriesChanged;
-  final ValueChanged<bool> onShowCompletedChanged;
   final bool isDarkMode;
 
   const FilterBottomSheet({
@@ -17,10 +15,8 @@ class FilterBottomSheet extends StatefulWidget {
     required this.categoriesMap,
     required this.currentSort,
     required this.selectedCategoryIds,
-    required this.showCompleted,
     required this.onSortChanged,
     required this.onCategoriesChanged,
-    required this.onShowCompletedChanged,
     required this.isDarkMode,
   });
 
@@ -31,13 +27,19 @@ class FilterBottomSheet extends StatefulWidget {
 class _FilterBottomSheetState extends State<FilterBottomSheet> {
   late SortOption _sort;
   late Set<int> _categoryIds;
-  late bool _showCompleted;
 
   static const _sortLabels = {
     SortOption.custom: 'Custom Order',
-    SortOption.dateCreated: 'Date Created (Newest)',
-    SortOption.dueDate: 'Due Date (Soonest)',
-    SortOption.alphabetical: 'Alphabetical (A-Z)',
+    SortOption.dateCreated: 'Date Created',
+    SortOption.dueDate: 'Due Date',
+    SortOption.alphabetical: 'Alphabetical',
+  };
+
+  static const _sortIcons = {
+    SortOption.custom: Icons.drag_indicator,
+    SortOption.dateCreated: Icons.schedule,
+    SortOption.dueDate: Icons.event,
+    SortOption.alphabetical: Icons.sort_by_alpha,
   };
 
   @override
@@ -45,7 +47,6 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
     super.initState();
     _sort = widget.currentSort;
     _categoryIds = {...widget.selectedCategoryIds};
-    _showCompleted = widget.showCompleted;
   }
 
   @override
@@ -85,36 +86,17 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
                       setState(() {
                         _sort = SortOption.custom;
                         _categoryIds = {};
-                        _showCompleted = true;
                       });
                       widget.onSortChanged(_sort);
                       widget.onCategoriesChanged(_categoryIds);
-                      widget.onShowCompletedChanged(_showCompleted);
                     },
                     child: const Text('Reset'),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
 
-              // Show/hide completed tasks
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                secondary: Icon(
-                  _showCompleted ? Icons.visibility : Icons.visibility_off,
-                  color: accentColor,
-                ),
-                title: const Text('Show finished tasks'),
-                value: _showCompleted,
-                onChanged: (value) {
-                  setState(() => _showCompleted = value);
-                  widget.onShowCompletedChanged(value);
-                },
-              ),
-
-              const Divider(height: 24),
-
-              // Sort by
+              // Sort by - chip style, matching the category filter below
               Text(
                 'Sort by',
                 style: Theme.of(context)
@@ -122,24 +104,34 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
                     .titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 4),
-              ..._sortLabels.entries.map((entry) {
-                return RadioListTile<SortOption>(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  activeColor: accentColor,
-                  title: Text(entry.value),
-                  value: entry.key,
-                  groupValue: _sort,
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _sort = value);
-                    widget.onSortChanged(value);
-                  },
-                );
-              }),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _sortLabels.entries.map((entry) {
+                  final isSelected = _sort == entry.key;
+                  return ChoiceChip(
+                    selected: isSelected,
+                    avatar: Icon(
+                      _sortIcons[entry.key],
+                      size: 16,
+                      color: isSelected ? Colors.white : accentColor,
+                    ),
+                    label: Text(entry.value),
+                    selectedColor: accentColor,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : null,
+                    ),
+                    onSelected: (selected) {
+                      if (!selected) return;
+                      setState(() => _sort = entry.key);
+                      widget.onSortChanged(entry.key);
+                    },
+                  );
+                }).toList(),
+              ),
 
-              const Divider(height: 24),
+              const Divider(height: 32),
 
               // Filter by category
               Text(
