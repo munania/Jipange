@@ -1,6 +1,6 @@
 import 'package:another_flutter_splash_screen/another_flutter_splash_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:locallists/features/lists/homepage.dart';
+import 'package:locallists/features/navigation/main_navigation.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -37,7 +37,7 @@ class _SplashScreenState extends State<SplashScreen> {
       duration: const Duration(milliseconds: 2000),
       animationDuration: const Duration(milliseconds: 1500),
       onAnimationEnd: () => debugPrint("On Scale End"),
-      nextScreen: const Homepage(),
+      nextScreen: const MainNavigation(),
     ));
   }
 }

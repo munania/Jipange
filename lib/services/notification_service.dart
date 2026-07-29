@@ -112,6 +112,34 @@ class NotificationService {
     return notificationId;
   }
 
+  /// Show an immediate notification (used e.g. when a Pomodoro session ends)
+  Future<void> showInstantNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    const androidDetails = AndroidNotificationDetails(
+      'pomodoro_alerts',
+      'Pomodoro Alerts',
+      channelDescription: 'Notifications for Pomodoro timer session changes',
+      importance: Importance.high,
+      priority: Priority.high,
+    );
+
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    );
+
+    const notificationDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await _notifications.show(id, title, body, notificationDetails);
+  }
+
   /// Cancel a task notification
   Future<void> cancelTaskNotification(int notificationId) async {
     await _notifications.cancel(notificationId);

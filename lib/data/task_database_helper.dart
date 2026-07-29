@@ -19,7 +19,7 @@ class TaskDatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 5, // Bumped to 5 to ensure migration runs
+      version: 6, // Bumped to 6 to add pomodoro_sessions table
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -101,6 +101,24 @@ class TaskDatabaseHelper {
         print('Error creating categories table (might already exist): $e');
       }
     }
+
+    if (oldVersion < 6) {
+      try {
+        await db.execute('''
+          CREATE TABLE pomodoro_sessions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_type TEXT NOT NULL,
+            duration_seconds INTEGER NOT NULL,
+            completed_at TEXT NOT NULL,
+            task_id INTEGER,
+            FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE SET NULL
+          )
+        ''');
+        print('Created pomodoro_sessions table');
+      } catch (e) {
+        print('Error creating pomodoro_sessions table (might already exist): $e');
+      }
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -157,6 +175,18 @@ class TaskDatabaseHelper {
       'color': 0xFFFF9800, // Colors.orange.value
       'icon': 58780, // Icons.shopping_cart.codePoint
     });
+
+    // Create pomodoro_sessions table
+    await db.execute('''
+      CREATE TABLE pomodoro_sessions(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_type TEXT NOT NULL,
+        duration_seconds INTEGER NOT NULL,
+        completed_at TEXT NOT NULL,
+        task_id INTEGER,
+        FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE SET NULL
+      )
+    ''');
   }
 
   /// Task CRUD Operations
@@ -182,21 +212,31 @@ class TaskDatabaseHelper {
   Future<List<Map<String, dynamic>>> getAllTasks({
     String? searchQuery,
     String? orderBy,
+    List<int>? categoryIds,
   }) async {
     final db = await instance.database;
 
-    String? where;
-    List<dynamic>? whereArgs;
+    final List<String> whereClauses = [];
+    final List<dynamic> whereArgs = [];
 
     if (searchQuery != null && searchQuery.isNotEmpty) {
-      where = 'title LIKE ? OR details LIKE ?';
-      whereArgs = ['%$searchQuery%', '%$searchQuery%'];
+      whereClauses.add('(title LIKE ? OR details LIKE ?)');
+      whereArgs.addAll(['%$searchQuery%', '%$searchQuery%']);
     }
+
+    if (categoryIds != null && categoryIds.isNotEmpty) {
+      final placeholders = List.filled(categoryIds.length, '?').join(', ');
+      whereClauses.add('category_id IN ($placeholders)');
+      whereArgs.addAll(categoryIds);
+    }
+
+    final String? where =
+        whereClauses.isNotEmpty ? whereClauses.join(' AND ') : null;
 
     final List<Map<String, dynamic>> tasks = await db.query(
       'tasks',
       where: where,
-      whereArgs: whereArgs,
+      whereArgs: whereArgs.isNotEmpty ? whereArgs : null,
       orderBy: orderBy,
     );
 
@@ -542,6 +582,67 @@ class TaskDatabaseHelper {
         );
       }
     });
+  }
+
+  /// Pomodoro session operations
+
+  // Record a completed pomodoro session
+  Future<int> insertPomodoroSession({
+    required String sessionType, // 'work', 'short_break', 'long_break'
+    required int durationSeconds,
+    required DateTime completedAt,
+    int? taskId,
+  }) async {
+    final db = await instance.database;
+    return await db.insert('pomodoro_sessions', {
+      'session_type': sessionType,
+      'duration_seconds': durationSeconds,
+      'completed_at': completedAt.toIso8601String(),
+      'task_id': taskId,
+    });
+  }
+
+  // Get all pomodoro sessions between two dates (inclusive of start, exclusive of end)
+  Future<List<Map<String, dynamic>>> getPomodoroSessions({
+    required DateTime start,
+    required DateTime end,
+    String? sessionType,
+  }) async {
+    final db = await instance.database;
+
+    final List<String> whereClauses = [
+      'completed_at >= ?',
+      'completed_at < ?',
+    ];
+    final List<dynamic> whereArgs = [
+      start.toIso8601String(),
+      end.toIso8601String(),
+    ];
+
+    if (sessionType != null) {
+      whereClauses.add('session_type = ?');
+      whereArgs.add(sessionType);
+    }
+
+    return await db.query(
+      'pomodoro_sessions',
+      where: whereClauses.join(' AND '),
+      whereArgs: whereArgs,
+      orderBy: 'completed_at ASC',
+    );
+  }
+
+  // Delete a single pomodoro session (rarely needed, but useful for corrections)
+  Future<int> deletePomodoroSession(int id) async {
+    final db = await instance.database;
+    return await db.delete('pomodoro_sessions',
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Clear all pomodoro history
+  Future<int> clearPomodoroHistory() async {
+    final db = await instance.database;
+    return await db.delete('pomodoro_sessions');
   }
 
   // Close the database

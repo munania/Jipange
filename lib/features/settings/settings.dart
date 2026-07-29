@@ -1,6 +1,7 @@
 import 'package:app_settings/app_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:locallists/features/categories/category_management_screen.dart';
+import 'package:locallists/features/settings/pomodoro_settings_screen.dart';
 import 'package:locallists/services/theme_notifier.dart';
 import 'package:provider/provider.dart';
 
@@ -45,6 +46,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (context) => const CategoryManagementScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          // Pomodoro timer settings
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ListTile(
+              leading: Icon(Icons.timer_outlined),
+              title: Text('Pomodoro Timer'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const PomodoroSettingsScreen(),
                   ),
                 );
               },

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:locallists/features/lists/task_details.dart';
 import 'package:locallists/features/lists/widgets/add_task_sheet.dart';
+import 'package:locallists/features/lists/widgets/filter_bottom_sheet.dart';
 import 'package:locallists/features/lists/widgets/task_list_item.dart';
 import 'package:locallists/features/settings/settings.dart';
 import 'package:locallists/services/notification_service.dart';
@@ -25,6 +26,7 @@ class _HomepageState extends State<Homepage> {
   bool _isSearching = false;
   String _searchQuery = '';
   SortOption _currentSortOption = SortOption.custom;
+  Set<int> _selectedCategoryIds = {};
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -53,15 +55,6 @@ class _HomepageState extends State<Homepage> {
     }
   }
 
-  Future<void> _toggleShowCompleted() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _showCompleted = !_showCompleted;
-    });
-    await prefs.setBool('showCompleted', _showCompleted);
-    _loadTasks();
-  }
-
   static bool isDarkMode(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark;
   }
@@ -88,6 +81,9 @@ class _HomepageState extends State<Homepage> {
       final tasks = await TaskDatabaseHelper.instance.getAllTasks(
         searchQuery: _searchQuery,
         orderBy: orderBy,
+        categoryIds: _selectedCategoryIds.isEmpty
+            ? null
+            : _selectedCategoryIds.toList(),
       );
 
       setState(() {
@@ -105,6 +101,9 @@ class _HomepageState extends State<Homepage> {
           final tasks = await TaskDatabaseHelper.instance.getAllTasks(
             searchQuery: _searchQuery,
             orderBy: 'id DESC',
+            categoryIds: _selectedCategoryIds.isEmpty
+                ? null
+                : _selectedCategoryIds.toList(),
           );
           setState(() {
             if (_showCompleted) {
@@ -201,6 +200,40 @@ class _HomepageState extends State<Homepage> {
     );
   }
 
+  // Show bottom sheet with sort/filter/show-completed options
+  void _showFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (BuildContext context) {
+        return FilterBottomSheet(
+          categoriesMap: _categoriesMap,
+          currentSort: _currentSortOption,
+          selectedCategoryIds: _selectedCategoryIds,
+          showCompleted: _showCompleted,
+          isDarkMode: isDarkMode(context),
+          onSortChanged: (sort) {
+            setState(() => _currentSortOption = sort);
+            _loadTasks();
+          },
+          onCategoriesChanged: (categoryIds) {
+            setState(() => _selectedCategoryIds = categoryIds);
+            _loadTasks();
+          },
+          onShowCompletedChanged: (value) async {
+            final prefs = await SharedPreferences.getInstance();
+            setState(() => _showCompleted = value);
+            await prefs.setBool('showCompleted', value);
+            _loadTasks();
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -243,40 +276,19 @@ class _HomepageState extends State<Homepage> {
               });
             },
           ),
-          PopupMenuButton<SortOption>(
-            icon: const Icon(Icons.sort),
-            tooltip: 'Sort by',
-            onSelected: (SortOption result) {
-              setState(() {
-                _currentSortOption = result;
-              });
-              _loadTasks();
-            },
-            itemBuilder: (BuildContext context) => <PopupMenuEntry<SortOption>>[
-              const PopupMenuItem<SortOption>(
-                value: SortOption.custom,
-                child: Text('Custom Order'),
-              ),
-              const PopupMenuItem<SortOption>(
-                value: SortOption.dateCreated,
-                child: Text('Date Created (Newest)'),
-              ),
-              const PopupMenuItem<SortOption>(
-                value: SortOption.dueDate,
-                child: Text('Due Date (Soonest)'),
-              ),
-              const PopupMenuItem<SortOption>(
-                value: SortOption.alphabetical,
-                child: Text('Alphabetical (A-Z)'),
-              ),
-              const PopupMenuDivider(),
-            ],
-          ),
           IconButton(
-            icon:
-                Icon(_showCompleted ? Icons.visibility : Icons.visibility_off),
-            tooltip: _showCompleted ? 'Hide Completed' : 'Show Completed',
-            onPressed: _toggleShowCompleted,
+            icon: Icon(
+              Icons.filter_list,
+              color: _selectedCategoryIds.isNotEmpty ||
+                      _currentSortOption != SortOption.custom ||
+                      !_showCompleted
+                  ? (isDarkMode
+                      ? AppThemes.lightSecondary
+                      : AppThemes.darkPrimary)
+                  : null,
+            ),
+            tooltip: 'Filter & Sort',
+            onPressed: _showFilterSheet,
           ),
           IconButton(
               icon: const Icon(Icons.settings),
@@ -380,6 +392,7 @@ class _HomepageState extends State<Homepage> {
                   // Prevent reordering if filtering is active or sorting is not custom or searching
                   if (!_showCompleted ||
                       _currentSortOption != SortOption.custom ||
+                      _selectedCategoryIds.isNotEmpty ||
                       _searchQuery.isNotEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -433,7 +446,11 @@ class _HomepageState extends State<Homepage> {
   @override
   void dispose() {
     _searchController.dispose();
-    TaskDatabaseHelper.instance.closeDatabase();
+    // Note: intentionally NOT closing TaskDatabaseHelper here anymore.
+    // Homepage now lives inside MainNavigation's IndexedStack alongside the
+    // Pomodoro tab, and both share the same TaskDatabaseHelper singleton, so
+    // closing it here could break Pomodoro session storage. The database
+    // connection is left open for the lifetime of the app.
     super.dispose();
   }
 }
