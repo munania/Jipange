@@ -434,7 +434,7 @@ class _TaskDetailsState extends State<TaskDetails> {
 
               // Category Dropdown
               DropdownButtonFormField<int>(
-                value: selectedCategoryId,
+                initialValue: selectedCategoryId,
                 decoration: InputDecoration(
                   labelText: 'Category',
                   border: OutlineInputBorder(

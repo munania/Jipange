@@ -123,21 +123,26 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
-              ..._sortLabels.entries.map((entry) {
-                return RadioListTile<SortOption>(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  activeColor: accentColor,
-                  title: Text(entry.value),
-                  value: entry.key,
-                  groupValue: _sort,
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _sort = value);
-                    widget.onSortChanged(value);
-                  },
-                );
-              }),
+              RadioGroup<SortOption>(
+                groupValue: _sort,
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() => _sort = value);
+                  widget.onSortChanged(value);
+                },
+                child: Column(
+                  children: _sortLabels.entries.map((entry) {
+                    return RadioListTile<SortOption>(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      activeColor: accentColor,
+                      title: Text(entry.value),
+                      value: entry.key,
+                      selected: _sort == entry.key,
+                    );
+                  }).toList(),
+                ),
+              ),
 
               const Divider(height: 24),
 
