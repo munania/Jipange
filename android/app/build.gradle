@@ -1,0 +1,82 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace = "com.example.locallists"
+    // Explicitly pinned (instead of flutter.compileSdkVersion) so we control
+    // this independently of the bundled Flutter SDK's default. Google Play
+    // requires existing apps to target API 35 (Android 15) by Aug 31, 2026
+    // to stay visible to new users on newer Android versions - this satisfies
+    // that. Note: new app *updates* submitted after Aug 31, 2026 will need to
+    // target API 36 (Android 16), but that requires Android Gradle Plugin
+    // 9.x + Gradle 9.x (current AGP 8.8.2 only supports up to API 35), which
+    // is a bigger, riskier migration best done as its own step closer to
+    // that deadline once plugins (sqflite, flutter_local_notifications, etc.)
+    // have confirmed AGP 9 compatibility.
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_17
+    }
+
+    defaultConfig {
+        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Changed from com.inktonedesign.jipange so this build installs
+        // side-by-side with the existing reference app instead of
+        // overwriting/upgrading it (Android treats apps as distinct by
+        // applicationId, not by display name).
+        applicationId = "com.munania.jipange"
+        // You can update the following values to match your application needs.
+        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        minSdk = flutter.minSdkVersion
+        // Explicitly pinned to API 35 (Android 15) to satisfy Google Play's
+        // target API level requirement for existing apps (deadline Aug 31,
+        // 2026). See note above compileSdk re: the future API 36 bump.
+        targetSdk = 35
+        versionCode = flutter.versionCode
+        versionName = "1.1.0" // update
+    }
+
+    signingConfigs {
+        release {
+            keyAlias = keystoreProperties['keyAlias']
+            keyPassword = keystoreProperties['keyPassword']
+            storeFile = keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+            storePassword = keystoreProperties['storePassword']
+        }
+    }
+    buildTypes {
+        release {
+            // TODO: Add your own signing config for the release build.
+            // Signing with the debug keys for now,
+            // so `flutter run --release` works.
+            signingConfig = signingConfigs.debug
+            signingConfig = signingConfigs.release
+        }
+    }
+}
+
+flutter {
+    source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+}
