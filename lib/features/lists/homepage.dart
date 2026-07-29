@@ -291,21 +291,20 @@ class _HomepageState extends State<Homepage> {
             onPressed: _showFilterSheet,
           ),
           IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () {
-                Future.delayed(
-                  const Duration(seconds: 0),
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const SettingsScreen(),
-                    ),
-                  ).then((_) {
-                    _loadCategories(); // Reload categories after returning
-                    _loadTasks();
-                  }),
-                );
-              }),
+            icon: const Icon(Icons.settings),
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const SettingsScreen(),
+                ),
+              );
+              if (mounted) {
+                _loadCategories(); // Reload categories after returning
+                _loadTasks();
+              }
+            },
+          ),
         ],
       ),
       body: SingleChildScrollView(
