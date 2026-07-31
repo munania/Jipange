@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -10,13 +11,27 @@ class NotificationService {
 
   NotificationService._init();
 
+  // Jipange's brand accent - tints the small status-bar icon on Android 5+
+  // so notifications are recognizably "ours" at a glance.
+  static const Color _brandColor = Color(0xFF7C86F5);
+
+  // The large icon shown on the right of the notification (Android). This
+  // is the full-color app logo - the small status-bar icon has to stay a
+  // flat white silhouette per Android's own design guidelines, so branding
+  // lives here instead.
+  static const _largeIcon =
+      DrawableResourceAndroidBitmap('@mipmap/ic_launcher');
+
   Future<void> initialize() async {
     // Initialize timezone
     tz.initializeTimeZones();
 
-    // Android initialization settings
+    // Android initialization settings - a dedicated flat/monochrome
+    // drawable, not the full-color launcher icon. Android silently
+    // discards unsuitable status-bar icons and falls back to its own
+    // default bell icon, which is what was happening before.
     const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+        AndroidInitializationSettings('@drawable/ic_notification');
 
     // iOS initialization settings
     const iosSettings = DarwinInitializationSettings(
@@ -79,22 +94,36 @@ class NotificationService {
       return notificationId;
     }
 
-    const androidDetails = AndroidNotificationDetails(
+    final title = '⏰ "$taskTitle" is due';
+    const body = 'Time to make it happen. Tap to open and check it off.';
+
+    final androidDetails = AndroidNotificationDetails(
       'task_reminders',
       'Task Reminders',
       channelDescription: 'Notifications for task due dates',
       importance: Importance.high,
       priority: Priority.high,
       showWhen: true,
+      color: _brandColor,
+      largeIcon: _largeIcon,
+      ticker: 'Task due: $taskTitle',
+      category: AndroidNotificationCategory.reminder,
+      styleInformation: BigTextStyleInformation(
+        body,
+        contentTitle: title,
+        summaryText: 'Jipange',
+        htmlFormatContentTitle: false,
+      ),
     );
 
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
+      subtitle: 'Jipange',
     );
 
-    const notificationDetails = NotificationDetails(
+    final notificationDetails = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );
@@ -102,8 +131,8 @@ class NotificationService {
     // Schedule notification
     await _notifications.zonedSchedule(
       notificationId,
-      'Task Due: $taskTitle',
-      'Your task is due now!',
+      title,
+      body,
       tz.TZDateTime.from(dueDateTime, tz.local),
       notificationDetails,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
@@ -121,21 +150,32 @@ class NotificationService {
     required String title,
     required String body,
   }) async {
-    const androidDetails = AndroidNotificationDetails(
+    final androidDetails = AndroidNotificationDetails(
       'pomodoro_alerts',
       'Pomodoro Alerts',
       channelDescription: 'Notifications for Pomodoro timer session changes',
       importance: Importance.high,
       priority: Priority.high,
+      color: _brandColor,
+      largeIcon: _largeIcon,
+      ticker: title,
+      category: AndroidNotificationCategory.status,
+      styleInformation: BigTextStyleInformation(
+        body,
+        contentTitle: title,
+        summaryText: 'Jipange • Pomodoro',
+        htmlFormatContentTitle: false,
+      ),
     );
 
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,
       presentSound: true,
+      subtitle: 'Jipange • Pomodoro',
     );
 
-    const notificationDetails = NotificationDetails(
+    final notificationDetails = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
     );

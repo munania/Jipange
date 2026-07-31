@@ -734,7 +734,6 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.grey.withValues(alpha: 0.35)),
                 ),
                 child: TextFormField(
                   controller: detailsController,
