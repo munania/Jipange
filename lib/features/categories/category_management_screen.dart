@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:locallists/data/task_database_helper.dart';
+import 'package:locallists/utils/theme.dart';
 
 class CategoryManagementScreen extends StatefulWidget {
   const CategoryManagementScreen({super.key});
@@ -184,6 +185,9 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final accent = AppThemes.accentFor(isDarkMode);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manage Categories'),
@@ -206,7 +210,7 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  icon: Icon(Icons.edit, color: accent),
                   onPressed: () => _addOrUpdateCategory(category: category),
                 ),
                 IconButton(
@@ -219,9 +223,9 @@ class _CategoryManagementScreenState extends State<CategoryManagementScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.blue,
+        backgroundColor: accent,
         onPressed: () => _addOrUpdateCategory(),
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }

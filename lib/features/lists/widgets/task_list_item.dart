@@ -43,19 +43,45 @@ class TaskListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = AppThemes.accentFor(isDarkMode);
+    final isDone = task['done'] == true;
+
     return Dismissible(
       key: ValueKey(task['id']),
       background: Container(
-        color: Colors.blue,
+        decoration: BoxDecoration(
+          color: accent,
+          borderRadius: BorderRadius.circular(14),
+        ),
         alignment: Alignment.centerLeft,
         padding: const EdgeInsets.only(left: 20),
-        child: Icon(Icons.edit, color: AppThemes.lightSecondary),
+        child: const Row(
+          children: [
+            Icon(Icons.edit, color: Colors.white),
+            SizedBox(width: 8),
+            Text('Edit',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ],
+        ),
       ),
       secondaryBackground: Container(
-        color: Colors.red,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE24C4C),
+          borderRadius: BorderRadius.circular(14),
+        ),
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.only(right: 20),
-        child: Icon(Icons.delete, color: AppThemes.lightSecondary),
+        child: const Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text('Delete',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+            SizedBox(width: 8),
+            Icon(Icons.delete, color: Colors.white),
+          ],
+        ),
       ),
       direction: DismissDirection.horizontal,
       confirmDismiss: (direction) async {
@@ -67,11 +93,12 @@ class TaskListItem extends StatelessWidget {
         }
         return false;
       },
-      child: GestureDetector(
-        onTap: onTap,
-        child: Card(
-          key: ValueKey(task['id']),
-          margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Card(
+        key: ValueKey(task['id']),
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
@@ -81,15 +108,22 @@ class TaskListItem extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        task['title'],
+                      AnimatedDefaultTextStyle(
+                        duration: const Duration(milliseconds: 200),
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
-                          decoration: task['done']
+                          color: isDone
+                              ? (isDarkMode
+                                  ? AppThemes.darkTextSecondary
+                                  : AppThemes.lightTextSecondary)
+                              : (isDarkMode ? AppThemes.darkTextPrimary
+                              : AppThemes.lightTextPrimary),
+                          decoration: isDone
                               ? TextDecoration.lineThrough
                               : TextDecoration.none,
                         ),
+                        child: Text(task['title']),
                       ),
                       if (task['category_id'] != null &&
                           categoriesMap.containsKey(task['category_id'])) ...[
@@ -121,9 +155,11 @@ class TaskListItem extends StatelessWidget {
                         const SizedBox(height: 4),
                         Text(
                           'Due: ${_formatDate(DateTime.parse(task['due_date']), context)}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey,
+                            color: isDarkMode
+                                ? AppThemes.darkTextSecondary
+                                : AppThemes.lightTextSecondary,
                           ),
                         ),
                       ],
@@ -132,17 +168,18 @@ class TaskListItem extends StatelessWidget {
                 ),
                 GestureDetector(
                   onTap: onStatusToggle,
-                  child: Icon(
-                    task['done']
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
-                    color: task['done']
-                        ? isDarkMode
-                            ? AppThemes.lightSecondary
-                            : AppThemes.darkSurface
-                        : isDarkMode
-                            ? AppThemes.lightSecondary
-                            : AppThemes.darkPrimary,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    transitionBuilder: (child, animation) => ScaleTransition(
+                      scale: animation,
+                      child: child,
+                    ),
+                    child: Icon(
+                      isDone ? Icons.check_circle : Icons.radio_button_unchecked,
+                      key: ValueKey(isDone),
+                      color: isDone ? const Color(0xFF4CAF50) : accent,
+                      size: 26,
+                    ),
                   ),
                 ),
               ],

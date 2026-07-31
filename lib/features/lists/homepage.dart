@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:locallists/data/task_database_helper.dart';
 import 'package:locallists/features/lists/task_details.dart';
 import 'package:locallists/features/lists/widgets/add_task_sheet.dart';
 import 'package:locallists/features/lists/widgets/filter_bottom_sheet.dart';
@@ -7,7 +8,6 @@ import 'package:locallists/features/settings/settings.dart';
 import 'package:locallists/services/notification_service.dart';
 import 'package:locallists/utils/theme.dart';
 
-import '../../data/task_database_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Homepage extends StatefulWidget {
@@ -317,7 +317,7 @@ class _HomepageState extends State<Homepage> {
       body: SingleChildScrollView(
         child: Padding(
           padding:
-              const EdgeInsets.only(left: 16.0, right: 16, top: 16, bottom: 70),
+              const EdgeInsets.only(left: 16.0, right: 16, top: 16, bottom: 100),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -394,7 +394,7 @@ class _HomepageState extends State<Homepage> {
                     onEdit: () => _showAddTaskBottomSheet(task: task),
                   );
                 },
-                onReorder: (int oldIndex, int newIndex) {
+                onReorderItem: (int oldIndex, int newIndex) {
                   // Prevent reordering if filtering is active or sorting is not custom or searching
                   if (!_showCompleted ||
                       _currentSortOption != SortOption.custom ||
@@ -439,12 +439,10 @@ class _HomepageState extends State<Homepage> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.blue,
+        heroTag: 'homepage_add_task_fab',
+        backgroundColor: AppThemes.accentFor(isDarkMode),
         onPressed: () => _showAddTaskBottomSheet(),
-        child: Icon(Icons.add,
-            color: isDarkMode
-                ? AppThemes.lightSecondary
-                : AppThemes.lightSecondary),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }

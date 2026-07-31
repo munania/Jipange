@@ -18,7 +18,7 @@ class TaskDetails extends StatefulWidget {
   State<TaskDetails> createState() => _TaskDetailsState();
 }
 
-class _TaskDetailsState extends State<TaskDetails> {
+class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
   DateTime? selectedDate;
   TimeOfDay? selectedTime;
   int? position;
@@ -28,6 +28,7 @@ class _TaskDetailsState extends State<TaskDetails> {
   final TextEditingController detailsController = TextEditingController();
   bool isLoading = false;
   bool isSaving = false;
+  bool isTaskDone = false;
 
   // Drives insert/remove animations for the subtasks list
   final GlobalKey<AnimatedListState> _subtaskListKey =
@@ -36,7 +37,23 @@ class _TaskDetailsState extends State<TaskDetails> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeData();
+  }
+
+  // Autosave whenever the app is backgrounded, closed, or the OS is about
+  // to reclaim it - so changes on this page are never lost by leaving the
+  // app rather than tapping Save explicitly.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      if (!isLoading) {
+        _performSave(showSnackbar: false, popAfter: false);
+      }
+    }
   }
 
   Future<void> _initializeData() async {
@@ -57,6 +74,7 @@ class _TaskDetailsState extends State<TaskDetails> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // Clean up controllers
     detailsController.dispose();
     for (var subtask in subtasks) {
@@ -97,6 +115,8 @@ class _TaskDetailsState extends State<TaskDetails> {
         // Populate category
         selectedCategoryId = taskData['category_id'];
 
+        isTaskDone = taskData['done'] == true || taskData['done'] == 1;
+
         // Populate subtasks (no animation for initial load)
         if (taskData.containsKey('subtasks')) {
           final List<dynamic> subtasksList = taskData['subtasks'];
@@ -120,12 +140,23 @@ class _TaskDetailsState extends State<TaskDetails> {
     }
   }
 
-  // Save task to database
-  Future<void> _saveTask() async {
-    if (!mounted) return;
+  // Explicit Save button - shows feedback and always navigates back
+  Future<void> _saveTask() => _performSave(showSnackbar: true, popAfter: true);
+
+  // Shared save routine used by the Save button, back-navigation, and the
+  // app-lifecycle autosave. `showSnackbar`/`popAfter` let each caller decide
+  // how loud/navigational the save should be (e.g. a background autosave
+  // should never try to pop or show UI).
+  Future<bool> _performSave({
+    required bool showSnackbar,
+    required bool popAfter,
+  }) async {
+    if (!mounted) return false;
     setState(() {
       isSaving = true;
     });
+
+    bool success = false;
 
     try {
       // Format date with time if both are selected
@@ -151,7 +182,7 @@ class _TaskDetailsState extends State<TaskDetails> {
         if (widget.taskId != null) 'id': widget.taskId,
         'title': widget.taskTitle,
         'details': detailsController.text,
-        'done': false, // New tasks are not done by default
+        'done': isTaskDone, // New tasks are not done by default
         'due_date': formattedDate,
         'position': position,
         'category_id': selectedCategoryId,
@@ -198,19 +229,16 @@ class _TaskDetailsState extends State<TaskDetails> {
         }
       }
 
+      success = true;
+
       // Show success message
-      if (mounted) {
+      if (mounted && showSnackbar) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Task saved successfully')),
         );
       }
-
-      // Navigate back
-      if (mounted) {
-        Navigator.pop(context, true); // Pass true to indicate change
-      }
     } catch (e) {
-      _showErrorSnackBar('Error saving task: $e');
+      if (showSnackbar) _showErrorSnackBar('Error saving task: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -218,6 +246,13 @@ class _TaskDetailsState extends State<TaskDetails> {
         });
       }
     }
+
+    // Navigate back
+    if (popAfter && mounted) {
+      Navigator.pop(context, true); // Pass true to indicate change
+    }
+
+    return success;
   }
 
   void _showErrorSnackBar(String message) {
@@ -637,7 +672,6 @@ class _TaskDetailsState extends State<TaskDetails> {
 
   @override
   Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     final doneCount = subtasks.where((s) => s.isDone).length;
 
     if (isLoading) {
@@ -647,7 +681,16 @@ class _TaskDetailsState extends State<TaskDetails> {
       );
     }
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        await _performSave(showSnackbar: false, popAfter: false);
+        if (mounted) {
+          Navigator.pop(context, true);
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(),
       body: SingleChildScrollView(
         child: Padding(
@@ -791,8 +834,8 @@ class _TaskDetailsState extends State<TaskDetails> {
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor:
-            isDarkMode ? AppThemes.darkSurface : AppThemes.darkPrimary,
+        heroTag: 'task_details_save_fab',
+        backgroundColor: _accentColor,
         onPressed: isSaving ? null : _saveTask,
         label: isSaving
             ? const Text('')
@@ -802,12 +845,11 @@ class _TaskDetailsState extends State<TaskDetails> {
               ),
         icon: isSaving
             ? const CircularProgressIndicator(color: Colors.white)
-            : Icon(
+            : const Icon(
                 Icons.save,
-                color: isDarkMode
-                    ? AppThemes.lightSecondary
-                    : AppThemes.lightSecondary,
+                color: Colors.white,
               ),
+      ),
       ),
     );
   }

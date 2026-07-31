@@ -183,7 +183,7 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
           const SizedBox(height: 16),
           // Category Dropdown
           DropdownButtonFormField<int>(
-            value: selectedCategoryId,
+            initialValue: selectedCategoryId,
             decoration: const InputDecoration(
               labelText: 'Category',
               border: OutlineInputBorder(),

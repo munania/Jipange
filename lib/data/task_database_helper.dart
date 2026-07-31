@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -26,7 +27,9 @@ class TaskDatabaseHelper {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    print('Upgrading database from $oldVersion to $newVersion');
+    if (kDebugMode) {
+      print('Upgrading database from $oldVersion to $newVersion');
+    }
 
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE tasks ADD COLUMN due_date TEXT');
@@ -56,16 +59,24 @@ class TaskDatabaseHelper {
       // Add category_id to tasks table
       try {
         await db.execute('ALTER TABLE tasks ADD COLUMN category_id INTEGER');
-        print('Added category_id column');
+        if (kDebugMode) {
+          print('Added category_id column');
+        }
       } catch (e) {
-        print('Error adding category_id (might already exist): $e');
+        if (kDebugMode) {
+          print('Error adding category_id (might already exist): $e');
+        }
       }
 
       try {
         await db.execute('ALTER TABLE tasks ADD COLUMN position INTEGER');
-        print('Added position column');
+        if (kDebugMode) {
+          print('Added position column');
+        }
       } catch (e) {
-        print('Error adding position (might already exist): $e');
+        if (kDebugMode) {
+          print('Error adding position (might already exist): $e');
+        }
       }
 
       // Create categories table
@@ -78,7 +89,9 @@ class TaskDatabaseHelper {
             icon INTEGER
           )
         ''');
-        print('Created categories table');
+        if (kDebugMode) {
+          print('Created categories table');
+        }
 
         // Insert default categories only if table was just created
         await db.insert('categories', {
@@ -96,9 +109,13 @@ class TaskDatabaseHelper {
           'color': 0xFFFF9800, // Colors.orange.value
           'icon': 58780, // Icons.shopping_cart.codePoint
         });
-        print('Inserted default categories');
+        if (kDebugMode) {
+          print('Inserted default categories');
+        }
       } catch (e) {
-        print('Error creating categories table (might already exist): $e');
+        if (kDebugMode) {
+          print('Error creating categories table (might already exist): $e');
+        }
       }
     }
 
@@ -114,9 +131,13 @@ class TaskDatabaseHelper {
             FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE SET NULL
           )
         ''');
-        print('Created pomodoro_sessions table');
+        if (kDebugMode) {
+          print('Created pomodoro_sessions table');
+        }
       } catch (e) {
-        print('Error creating pomodoro_sessions table (might already exist): $e');
+        if (kDebugMode) {
+          print('Error creating pomodoro_sessions table (might already exist): $e');
+        }
       }
     }
   }
