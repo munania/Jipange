@@ -20,7 +20,7 @@ class TaskDatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6, // Bumped to 6 to add pomodoro_sessions table
+      version: 7, // Bumped to 7 to add tasks.priority column
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -140,6 +140,20 @@ class TaskDatabaseHelper {
         }
       }
     }
+
+    if (oldVersion < 7) {
+      try {
+        await db.execute(
+            'ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0');
+        if (kDebugMode) {
+          print('Added priority column to tasks table');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('Error adding priority column (might already exist): $e');
+        }
+      }
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -155,7 +169,8 @@ class TaskDatabaseHelper {
         done INTEGER,
         due_date TEXT,
         category_id INTEGER,
-        position INTEGER
+        position INTEGER,
+        priority INTEGER DEFAULT 0
       )
     ''');
 
@@ -234,6 +249,7 @@ class TaskDatabaseHelper {
     String? searchQuery,
     String? orderBy,
     List<int>? categoryIds,
+    List<int>? priorities,
   }) async {
     final db = await instance.database;
 
@@ -249,6 +265,12 @@ class TaskDatabaseHelper {
       final placeholders = List.filled(categoryIds.length, '?').join(', ');
       whereClauses.add('category_id IN ($placeholders)');
       whereArgs.addAll(categoryIds);
+    }
+
+    if (priorities != null && priorities.isNotEmpty) {
+      final placeholders = List.filled(priorities.length, '?').join(', ');
+      whereClauses.add('priority IN ($placeholders)');
+      whereArgs.addAll(priorities);
     }
 
     final String? where =
@@ -270,6 +292,7 @@ class TaskDatabaseHelper {
               'due_date': task['due_date'],
               'category_id': task['category_id'],
               'position': task['position'],
+              'priority': task['priority'] ?? 0,
             })
         .toList();
   }
@@ -305,6 +328,7 @@ class TaskDatabaseHelper {
       'due_date': tasks.first['due_date'],
       'category_id': tasks.first['category_id'],
       'position': tasks.first['position'],
+      'priority': tasks.first['priority'] ?? 0,
       'subtasks': subtasks
           .map((subtask) => {
                 'id': subtask['id'],
@@ -486,6 +510,7 @@ class TaskDatabaseHelper {
             'due_date': task['due_date'],
             'category_id': task['category_id'],
             'position': task['position'],
+            'priority': task['priority'] ?? 0,
           },
           where: 'id = ?',
           whereArgs: [taskId],
@@ -501,6 +526,7 @@ class TaskDatabaseHelper {
             'due_date': task['due_date'],
             'category_id': task['category_id'],
             'position': task['position'],
+            'priority': task['priority'] ?? 0,
           },
         );
       }

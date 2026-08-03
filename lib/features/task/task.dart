@@ -1,3 +1,63 @@
+import 'package:flutter/material.dart';
+
+/// Task priority levels. The integer `value` is what's stored in the
+/// `tasks.priority` column (0 = none/default).
+enum TaskPriority {
+  none(0),
+  low(1),
+  medium(2),
+  high(3);
+
+  final int value;
+  const TaskPriority(this.value);
+
+  static TaskPriority fromValue(int? value) {
+    return TaskPriority.values.firstWhere(
+      (p) => p.value == value,
+      orElse: () => TaskPriority.none,
+    );
+  }
+
+  String get label {
+    switch (this) {
+      case TaskPriority.none:
+        return 'None';
+      case TaskPriority.low:
+        return 'Low';
+      case TaskPriority.medium:
+        return 'Medium';
+      case TaskPriority.high:
+        return 'High';
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case TaskPriority.none:
+        return Colors.grey;
+      case TaskPriority.low:
+        return const Color(0xFF4CAF50); // green
+      case TaskPriority.medium:
+        return const Color(0xFFEF8B3B); // orange
+      case TaskPriority.high:
+        return const Color(0xFFE24C4C); // red
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case TaskPriority.none:
+        return Icons.remove;
+      case TaskPriority.low:
+        return Icons.keyboard_arrow_down;
+      case TaskPriority.medium:
+        return Icons.drag_handle;
+      case TaskPriority.high:
+        return Icons.keyboard_arrow_up;
+    }
+  }
+}
+
 class Task {
   int? id;
   String title;

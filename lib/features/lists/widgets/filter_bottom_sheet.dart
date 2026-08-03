@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:locallists/features/lists/homepage.dart' show SortOption;
+import 'package:locallists/features/task/task.dart';
 import 'package:locallists/utils/theme.dart';
 
 class FilterBottomSheet extends StatefulWidget {
   final Map<int, Map<String, dynamic>> categoriesMap;
   final SortOption currentSort;
   final Set<int> selectedCategoryIds;
+  final Set<int> selectedPriorities;
   final ValueChanged<SortOption> onSortChanged;
   final ValueChanged<Set<int>> onCategoriesChanged;
+  final ValueChanged<Set<int>> onPrioritiesChanged;
   final bool isDarkMode;
 
   const FilterBottomSheet({
@@ -15,8 +18,10 @@ class FilterBottomSheet extends StatefulWidget {
     required this.categoriesMap,
     required this.currentSort,
     required this.selectedCategoryIds,
+    required this.selectedPriorities,
     required this.onSortChanged,
     required this.onCategoriesChanged,
+    required this.onPrioritiesChanged,
     required this.isDarkMode,
   });
 
@@ -27,12 +32,14 @@ class FilterBottomSheet extends StatefulWidget {
 class _FilterBottomSheetState extends State<FilterBottomSheet> {
   late SortOption _sort;
   late Set<int> _categoryIds;
+  late Set<int> _priorities;
 
   static const _sortLabels = {
     SortOption.custom: 'Custom Order',
     SortOption.dateCreated: 'Date Created',
     SortOption.dueDate: 'Due Date',
     SortOption.alphabetical: 'Alphabetical',
+    SortOption.priority: 'Priority',
   };
 
   static const _sortIcons = {
@@ -40,6 +47,7 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
     SortOption.dateCreated: Icons.schedule,
     SortOption.dueDate: Icons.event,
     SortOption.alphabetical: Icons.sort_by_alpha,
+    SortOption.priority: Icons.flag,
   };
 
   @override
@@ -47,6 +55,7 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
     super.initState();
     _sort = widget.currentSort;
     _categoryIds = {...widget.selectedCategoryIds};
+    _priorities = {...widget.selectedPriorities};
   }
 
   @override
@@ -86,9 +95,11 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
                       setState(() {
                         _sort = SortOption.custom;
                         _categoryIds = {};
+                        _priorities = {};
                       });
                       widget.onSortChanged(_sort);
                       widget.onCategoriesChanged(_categoryIds);
+                      widget.onPrioritiesChanged(_priorities);
                     },
                     child: const Text('Reset'),
                   ),
@@ -180,6 +191,49 @@ class _FilterBottomSheetState extends State<FilterBottomSheet> {
                     );
                   }).toList(),
                 ),
+              const SizedBox(height: 24),
+
+              // Filter by priority
+              Text(
+                'Filter by priority',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: TaskPriority.values
+                    .where((p) => p != TaskPriority.none)
+                    .map((p) {
+                  final isSelected = _priorities.contains(p.value);
+                  return FilterChip(
+                    selected: isSelected,
+                    avatar: Icon(
+                      p.icon,
+                      size: 16,
+                      color: isSelected ? Colors.white : p.color,
+                    ),
+                    label: Text(p.label),
+                    selectedColor: p.color,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : null,
+                    ),
+                    onSelected: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _priorities.add(p.value);
+                        } else {
+                          _priorities.remove(p.value);
+                        }
+                      });
+                      widget.onPrioritiesChanged(_priorities);
+                    },
+                  );
+                }).toList(),
+              ),
               const SizedBox(height: 8),
             ],
           ),

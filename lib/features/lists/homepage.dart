@@ -17,7 +17,7 @@ class Homepage extends StatefulWidget {
   State<Homepage> createState() => _HomepageState();
 }
 
-enum SortOption { custom, dateCreated, dueDate, alphabetical }
+enum SortOption { custom, dateCreated, dueDate, alphabetical, priority }
 
 class _HomepageState extends State<Homepage> {
   List<Map<String, dynamic>> userTasks = [];
@@ -27,6 +27,7 @@ class _HomepageState extends State<Homepage> {
   String _searchQuery = '';
   SortOption _currentSortOption = SortOption.custom;
   Set<int> _selectedCategoryIds = {};
+  Set<int> _selectedPriorities = {};
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -72,6 +73,9 @@ class _HomepageState extends State<Homepage> {
       case SortOption.alphabetical:
         orderBy = 'title ASC';
         break;
+      case SortOption.priority:
+        orderBy = 'priority DESC';
+        break;
       case SortOption.custom:
         orderBy = 'position ASC';
         break;
@@ -84,6 +88,8 @@ class _HomepageState extends State<Homepage> {
         categoryIds: _selectedCategoryIds.isEmpty
             ? null
             : _selectedCategoryIds.toList(),
+        priorities:
+            _selectedPriorities.isEmpty ? null : _selectedPriorities.toList(),
       );
 
       setState(() {
@@ -104,6 +110,9 @@ class _HomepageState extends State<Homepage> {
             categoryIds: _selectedCategoryIds.isEmpty
                 ? null
                 : _selectedCategoryIds.toList(),
+            priorities: _selectedPriorities.isEmpty
+                ? null
+                : _selectedPriorities.toList(),
           );
           setState(() {
             if (_showCompleted) {
@@ -213,6 +222,7 @@ class _HomepageState extends State<Homepage> {
           categoriesMap: _categoriesMap,
           currentSort: _currentSortOption,
           selectedCategoryIds: _selectedCategoryIds,
+          selectedPriorities: _selectedPriorities,
           isDarkMode: isDarkMode(context),
           onSortChanged: (sort) {
             setState(() => _currentSortOption = sort);
@@ -220,6 +230,10 @@ class _HomepageState extends State<Homepage> {
           },
           onCategoriesChanged: (categoryIds) {
             setState(() => _selectedCategoryIds = categoryIds);
+            _loadTasks();
+          },
+          onPrioritiesChanged: (priorities) {
+            setState(() => _selectedPriorities = priorities);
             _loadTasks();
           },
         );
@@ -287,6 +301,7 @@ class _HomepageState extends State<Homepage> {
             icon: Icon(
               Icons.tune,
               color: _selectedCategoryIds.isNotEmpty ||
+                      _selectedPriorities.isNotEmpty ||
                       _currentSortOption != SortOption.custom
                   ? (isDarkMode
                       ? AppThemes.lightSecondary
@@ -399,6 +414,7 @@ class _HomepageState extends State<Homepage> {
                   if (!_showCompleted ||
                       _currentSortOption != SortOption.custom ||
                       _selectedCategoryIds.isNotEmpty ||
+                      _selectedPriorities.isNotEmpty ||
                       _searchQuery.isNotEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(

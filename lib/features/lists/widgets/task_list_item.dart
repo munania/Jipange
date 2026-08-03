@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:locallists/features/task/task.dart';
 import 'package:locallists/utils/theme.dart';
 
 class TaskListItem extends StatelessWidget {
@@ -45,6 +46,7 @@ class TaskListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = AppThemes.accentFor(isDarkMode);
     final isDone = task['done'] == true;
+    final priority = TaskPriority.fromValue(task['priority']);
 
     return Dismissible(
       key: ValueKey(task['id']),
@@ -97,93 +99,113 @@ class TaskListItem extends StatelessWidget {
         key: ValueKey(task['id']),
         margin: const EdgeInsets.symmetric(vertical: 8),
         clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 200),
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: isDone
-                              ? (isDarkMode
-                                  ? AppThemes.darkTextSecondary
-                                  : AppThemes.lightTextSecondary)
-                              : (isDarkMode ? AppThemes.darkTextPrimary
-                              : AppThemes.lightTextPrimary),
-                          decoration: isDone
-                              ? TextDecoration.lineThrough
-                              : TextDecoration.none,
-                        ),
-                        child: Text(task['title']),
-                      ),
-                      if (task['category_id'] != null &&
-                          categoriesMap.containsKey(task['category_id'])) ...[
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              IconData(
-                                  categoriesMap[task['category_id']]!['icon'],
-                                  fontFamily: 'MaterialIcons'),
-                              size: 12,
-                              color: Color(
-                                  categoriesMap[task['category_id']]!['color']),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              categoriesMap[task['category_id']]!['name'],
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Color(categoriesMap[
-                                    task['category_id']]!['color']),
-                                fontWeight: FontWeight.bold,
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Priority stripe - only shown when a priority is actually set
+              if (priority != TaskPriority.none)
+                Container(width: 4, color: priority.color),
+              Expanded(
+                child: InkWell(
+                  onTap: onTap,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              AnimatedDefaultTextStyle(
+                                duration: const Duration(milliseconds: 200),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDone
+                                      ? (isDarkMode
+                                          ? AppThemes.darkTextSecondary
+                                          : AppThemes.lightTextSecondary)
+                                      : (isDarkMode
+                                          ? AppThemes.darkTextPrimary
+                                          : AppThemes.lightTextPrimary),
+                                  decoration: isDone
+                                      ? TextDecoration.lineThrough
+                                      : TextDecoration.none,
+                                ),
+                                child: Text(task['title']),
                               ),
-                            ),
-                          ],
+                              if (task['category_id'] != null &&
+                                  categoriesMap
+                                      .containsKey(task['category_id'])) ...[
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      IconData(
+                                          categoriesMap[
+                                              task['category_id']]!['icon'],
+                                          fontFamily: 'MaterialIcons'),
+                                      size: 12,
+                                      color: Color(categoriesMap[
+                                          task['category_id']]!['color']),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      categoriesMap[
+                                          task['category_id']]!['name'],
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Color(categoriesMap[
+                                            task['category_id']]!['color']),
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              if (task['due_date'] != null) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Due: ${_formatDate(DateTime.parse(task['due_date']), context)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDarkMode
+                                        ? AppThemes.darkTextSecondary
+                                        : AppThemes.lightTextSecondary,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
-                      ],
-                      if (task['due_date'] != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          'Due: ${_formatDate(DateTime.parse(task['due_date']), context)}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDarkMode
-                                ? AppThemes.darkTextSecondary
-                                : AppThemes.lightTextSecondary,
+                        GestureDetector(
+                          onTap: onStatusToggle,
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 220),
+                            transitionBuilder: (child, animation) =>
+                                ScaleTransition(
+                              scale: animation,
+                              child: child,
+                            ),
+                            child: Icon(
+                              isDone
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              key: ValueKey(isDone),
+                              color:
+                                  isDone ? const Color(0xFF4CAF50) : accent,
+                              size: 26,
+                            ),
                           ),
                         ),
                       ],
-                    ],
-                  ),
-                ),
-                GestureDetector(
-                  onTap: onStatusToggle,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    transitionBuilder: (child, animation) => ScaleTransition(
-                      scale: animation,
-                      child: child,
-                    ),
-                    child: Icon(
-                      isDone ? Icons.check_circle : Icons.radio_button_unchecked,
-                      key: ValueKey(isDone),
-                      color: isDone ? const Color(0xFF4CAF50) : accent,
-                      size: 26,
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

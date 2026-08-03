@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:locallists/data/task_database_helper.dart';
 import 'package:locallists/features/task/task.dart';
@@ -23,6 +25,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
   TimeOfDay? selectedTime;
   int? position;
   int? selectedCategoryId;
+  TaskPriority priority = TaskPriority.none;
   List<Category> categories = [];
   final List<SubtaskItem> subtasks = [];
   final TextEditingController detailsController = TextEditingController();
@@ -38,6 +41,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    detailsController.addListener(_scheduleDebouncedSave);
     _initializeData();
   }
 
@@ -62,6 +66,8 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
     // Then load task data if editing
     if (widget.taskId != null) {
       await _loadTaskData();
+    } else if (mounted) {
+      setState(() => isLoading = false);
     }
   }
 
@@ -75,6 +81,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _saveDebounce?.cancel();
     // Clean up controllers
     detailsController.dispose();
     for (var subtask in subtasks) {
@@ -114,6 +121,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
 
         // Populate category
         selectedCategoryId = taskData['category_id'];
+        priority = TaskPriority.fromValue(taskData['priority']);
 
         isTaskDone = taskData['done'] == true || taskData['done'] == 1;
 
@@ -123,6 +131,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
           subtasks.clear();
           for (var subtask in subtasksList) {
             final controller = TextEditingController(text: subtask['title']);
+            controller.addListener(_scheduleDebouncedSave);
             subtasks.add(SubtaskItem(
               id: subtask['id'],
               controller: controller,
@@ -186,6 +195,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
         'due_date': formattedDate,
         'position': position,
         'category_id': selectedCategoryId,
+        'priority': priority.value,
         'subtasks': subtasks
             .map((subtask) => {
                   if (subtask.id != null) 'id': subtask.id,
@@ -557,6 +567,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
     setState(() {
       subtasks[index].isDone = !subtasks[index].isDone;
     });
+    _persistNow();
   }
 
   // Add a new (empty) subtask with a smooth insert animation
@@ -565,6 +576,9 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
       controller: TextEditingController(),
       isDone: false,
     );
+    // Persist as soon as the user stops typing the subtask's title, rather
+    // than relying solely on back-navigation/app-lifecycle autosave timing.
+    newItem.controller.addListener(_scheduleDebouncedSave);
     subtasks.add(newItem);
     _subtaskListKey.currentState?.insertItem(
       subtasks.length - 1,
@@ -579,6 +593,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
   // Remove a subtask with a smooth removal animation
   void _removeSubtask(int index) {
     final removedItem = subtasks[index];
+    removedItem.controller.removeListener(_scheduleDebouncedSave);
     _subtaskListKey.currentState?.removeItem(
       index,
       (context, animation) =>
@@ -586,6 +601,23 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
       duration: const Duration(milliseconds: 250),
     );
     subtasks.removeAt(index);
+    _persistNow();
+  }
+
+  // Debounced auto-save: fires ~600ms after the user stops typing, so
+  // subtask/detail text is persisted well before they navigate away rather
+  // than depending entirely on a single save-on-exit.
+  Timer? _saveDebounce;
+  void _scheduleDebouncedSave() {
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(milliseconds: 600), _persistNow);
+  }
+
+  // Fire-and-forget immediate save, used by all the auto-save triggers
+  // above. Intentionally silent (no snackbar/pop) so it never interrupts
+  // what the user is doing.
+  void _persistNow() {
+    _performSave(showSnackbar: false, popAfter: false);
   }
 
   // Wraps a subtask row with the fade + size transition used for both
@@ -716,6 +748,35 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
                   const SizedBox(width: 10),
                   Expanded(child: _buildDueDatePill()),
                 ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // Priority selector
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: TaskPriority.values.map((p) {
+                  final isSelected = priority == p;
+                  return ChoiceChip(
+                    selected: isSelected,
+                    avatar: Icon(
+                      p.icon,
+                      size: 16,
+                      color: isSelected ? Colors.white : p.color,
+                    ),
+                    label: Text(p.label),
+                    selectedColor: p.color,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : null,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    onSelected: (selected) {
+                      setState(() => priority = selected ? p : TaskPriority.none);
+                      _persistNow();
+                    },
+                  );
+                }).toList(),
               ),
 
               const SizedBox(height: 24),
