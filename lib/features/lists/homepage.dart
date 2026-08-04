@@ -6,6 +6,7 @@ import 'package:locallists/features/lists/widgets/filter_bottom_sheet.dart';
 import 'package:locallists/features/lists/widgets/task_list_item.dart';
 import 'package:locallists/features/settings/settings.dart';
 import 'package:locallists/services/notification_service.dart';
+import 'package:locallists/services/search_history.dart';
 import 'package:locallists/utils/theme.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,11 +30,23 @@ class _HomepageState extends State<Homepage> {
   Set<int> _selectedCategoryIds = {};
   Set<int> _selectedPriorities = {};
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  List<String> _recentSearches = [];
+
+  // Bulk multi-select
+  bool _selectionMode = false;
+  Set<int> _selectedTaskIds = {};
 
   @override
   void initState() {
     super.initState();
     _loadPreferences();
+    _loadRecentSearches();
+    // Rebuild when search focus changes so the recent-searches list can
+    // show/hide itself.
+    _searchFocusNode.addListener(() {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _loadPreferences() async {
@@ -43,6 +56,11 @@ class _HomepageState extends State<Homepage> {
     });
     _loadCategories();
     _loadTasks();
+  }
+
+  Future<void> _loadRecentSearches() async {
+    final recent = await SearchHistory.load();
+    if (mounted) setState(() => _recentSearches = recent);
   }
 
   Future<void> _loadCategories() async {
@@ -249,216 +267,466 @@ class _HomepageState extends State<Homepage> {
     _loadTasks();
   }
 
+  // Run a search, saving it into recent-search history
+  Future<void> _runSearch(String value) async {
+    setState(() => _searchQuery = value);
+    _loadTasks();
+    if (value.trim().isNotEmpty) {
+      final updated = await SearchHistory.add(value);
+      if (mounted) setState(() => _recentSearches = updated);
+    }
+  }
+
+  void _applyRecentSearch(String query) {
+    _searchController.text = query;
+    _searchController.selection =
+        TextSelection.collapsed(offset: query.length);
+    _runSearch(query);
+    _searchFocusNode.unfocus();
+  }
+
+  Future<void> _removeRecentSearch(String query) async {
+    final updated = await SearchHistory.remove(query);
+    if (mounted) setState(() => _recentSearches = updated);
+  }
+
+  Future<void> _clearRecentSearches() async {
+    await SearchHistory.clear();
+    if (mounted) setState(() => _recentSearches = []);
+  }
+
+  // ---- Bulk selection ----
+
+  void _enterSelectionMode(int taskId) {
+    setState(() {
+      _selectionMode = true;
+      _selectedTaskIds = {taskId};
+    });
+  }
+
+  void _toggleTaskSelection(int taskId) {
+    setState(() {
+      if (_selectedTaskIds.contains(taskId)) {
+        _selectedTaskIds.remove(taskId);
+      } else {
+        _selectedTaskIds.add(taskId);
+      }
+      if (_selectedTaskIds.isEmpty) {
+        _selectionMode = false;
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedTaskIds = {};
+    });
+  }
+
+  Future<void> _bulkDelete() async {
+    final count = _selectedTaskIds.length;
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Tasks'),
+        content: Text(
+            'Are you sure you want to delete $count task${count == 1 ? '' : 's'}?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true) return;
+
+    final ids = List<int>.from(_selectedTaskIds);
+    for (final id in ids) {
+      await _deleteTask(id);
+    }
+    _exitSelectionMode();
+  }
+
+  Future<void> _bulkMarkDone() async {
+    final ids = List<int>.from(_selectedTaskIds);
+    for (final id in ids) {
+      await _updateTaskStatus(id, true);
+    }
+    _exitSelectionMode();
+  }
+
+  Future<void> _bulkMoveToCategory() async {
+    final result = await showModalBottomSheet<int?>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Move to category',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: const Icon(Icons.block, color: Colors.grey),
+                  title: const Text('No Category'),
+                  onTap: () => Navigator.pop(context, -1),
+                ),
+                ..._categoriesMap.values.map((category) {
+                  return ListTile(
+                    leading: Icon(
+                      IconData(category['icon'], fontFamily: 'MaterialIcons'),
+                      color: Color(category['color']),
+                    ),
+                    title: Text(category['name']),
+                    onTap: () => Navigator.pop(context, category['id']),
+                  );
+                }),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (result == null) return; // dismissed without a choice
+    final categoryId = result == -1 ? null : result;
+
+    final ids = List<int>.from(_selectedTaskIds);
+    for (final id in ids) {
+      await TaskDatabaseHelper.instance.updateTaskCategory(id, categoryId);
+    }
+    await _loadTasks();
+    _exitSelectionMode();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final accent = AppThemes.accentFor(isDarkMode);
+    final showRecentSearches = _isSearching &&
+        _searchFocusNode.hasFocus &&
+        _searchQuery.isEmpty &&
+        _recentSearches.isNotEmpty;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: _isSearching
-            ? TextField(
-                controller: _searchController,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  hintText: 'Search tasks...',
-                  border: InputBorder.none,
-                  hintStyle: TextStyle(color: Colors.grey),
+    return PopScope(
+      canPop: !_selectionMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (_selectionMode) _exitSelectionMode();
+      },
+      child: Scaffold(
+        appBar: _selectionMode
+            ? AppBar(
+                leading: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: _exitSelectionMode,
                 ),
-                style: TextStyle(
-                  color: isDarkMode ? Colors.white : Colors.black,
-                ),
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value;
-                  });
-                  _loadTasks();
-                },
+                title: Text('${_selectedTaskIds.length} selected'),
+                actions: [
+                  IconButton(
+                    icon: const Icon(Icons.check_circle_outline),
+                    tooltip: 'Mark done',
+                    onPressed:
+                        _selectedTaskIds.isEmpty ? null : _bulkMarkDone,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.label_outline),
+                    tooltip: 'Move to category',
+                    onPressed:
+                        _selectedTaskIds.isEmpty ? null : _bulkMoveToCategory,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    tooltip: 'Delete',
+                    onPressed: _selectedTaskIds.isEmpty ? null : _bulkDelete,
+                  ),
+                ],
               )
-            : const Text("Jipange"),
-        actions: [
-          IconButton(
-            icon: Icon(_isSearching ? Icons.close : Icons.search),
-            onPressed: () {
-              setState(() {
-                if (_isSearching) {
-                  _isSearching = false;
-                  _searchQuery = '';
-                  _searchController.clear();
-                  _loadTasks();
-                } else {
-                  _isSearching = true;
-                }
-              });
-            },
-          ),
-          IconButton(
-            icon:
-                Icon(_showCompleted ? Icons.visibility : Icons.visibility_off),
-            tooltip: _showCompleted ? 'Hide finished tasks' : 'Show finished tasks',
-            onPressed: _toggleShowCompleted,
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.tune,
-              color: _selectedCategoryIds.isNotEmpty ||
-                      _selectedPriorities.isNotEmpty ||
-                      _currentSortOption != SortOption.custom
-                  ? (isDarkMode
-                      ? AppThemes.lightSecondary
-                      : AppThemes.darkPrimary)
-                  : null,
-            ),
-            tooltip: 'Filter & Sort',
-            onPressed: _showFilterSheet,
-          ),
-          IconButton(
-              icon: const Icon(Icons.settings),
-              onPressed: () {
-                Future.delayed(
-                  const Duration(seconds: 0),
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const SettingsScreen(),
+            : AppBar(
+                title: _isSearching
+                    ? TextField(
+                        controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: 'Search tasks...',
+                          border: InputBorder.none,
+                          hintStyle: TextStyle(color: Colors.grey),
+                        ),
+                        style: TextStyle(
+                          color: isDarkMode ? Colors.white : Colors.black,
+                        ),
+                        onChanged: (value) {
+                          setState(() => _searchQuery = value);
+                          _loadTasks();
+                        },
+                        onSubmitted: _runSearch,
+                      )
+                    : const Text("Jipange"),
+                actions: [
+                  IconButton(
+                    icon: Icon(_isSearching ? Icons.close : Icons.search),
+                    onPressed: () {
+                      setState(() {
+                        if (_isSearching) {
+                          _isSearching = false;
+                          _searchQuery = '';
+                          _searchController.clear();
+                          _loadTasks();
+                        } else {
+                          _isSearching = true;
+                        }
+                      });
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(_showCompleted
+                        ? Icons.visibility
+                        : Icons.visibility_off),
+                    tooltip: _showCompleted
+                        ? 'Hide finished tasks'
+                        : 'Show finished tasks',
+                    onPressed: _toggleShowCompleted,
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.tune,
+                      color: _selectedCategoryIds.isNotEmpty ||
+                              _selectedPriorities.isNotEmpty ||
+                              _currentSortOption != SortOption.custom
+                          ? accent
+                          : null,
                     ),
-                  ).then((_) {
-                    _loadCategories(); // Reload categories after returning
-                    _loadTasks();
-                  }),
-                );
-              }),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding:
-              const EdgeInsets.only(left: 16.0, right: 16, top: 16, bottom: 100),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Your Tasks',
-                style: Theme.of(context).textTheme.titleMedium,
+                    tooltip: 'Filter & Sort',
+                    onPressed: _showFilterSheet,
+                  ),
+                  IconButton(
+                      icon: const Icon(Icons.settings),
+                      onPressed: () {
+                        Future.delayed(
+                          const Duration(seconds: 0),
+                          () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const SettingsScreen(),
+                            ),
+                          ).then((_) {
+                            _loadCategories(); // Reload categories after returning
+                            _loadTasks();
+                          }),
+                        );
+                      }),
+                ],
               ),
-              const SizedBox(height: 16),
-              ReorderableListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: userTasks.length,
-                itemBuilder: (context, index) {
-                  final task = userTasks[index];
-                  return TaskListItem(
-                    key: ValueKey(task['id']),
-                    task: task,
-                    categoriesMap: _categoriesMap,
-                    isDarkMode: isDarkMode,
-                    onDismiss: (direction) async {
-                      if (direction == DismissDirection.endToStart) {
-                        // Store the context's mounted status before the async gap
-                        if (!context.mounted) return false;
+        body: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.only(
+                left: 16.0, right: 16, top: 16, bottom: 100),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (showRecentSearches) ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Recent searches',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      TextButton(
+                        onPressed: _clearRecentSearches,
+                        child: const Text('Clear'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _recentSearches.map((query) {
+                      return InputChip(
+                        avatar: const Icon(Icons.history, size: 16),
+                        label: Text(query),
+                        onPressed: () => _applyRecentSearch(query),
+                        onDeleted: () => _removeRecentSearch(query),
+                        deleteIconColor: Colors.grey,
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+                Text(
+                  'Your Tasks',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 16),
+                ReorderableListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: userTasks.length,
+                  itemBuilder: (context, index) {
+                    final task = userTasks[index];
+                    final taskId = task['id'] as int;
+                    return TaskListItem(
+                      key: ValueKey(taskId),
+                      task: task,
+                      categoriesMap: _categoriesMap,
+                      isDarkMode: isDarkMode,
+                      selectionMode: _selectionMode,
+                      isSelected: _selectedTaskIds.contains(taskId),
+                      onLongPress: () => _enterSelectionMode(taskId),
+                      onSelectToggle: () => _toggleTaskSelection(taskId),
+                      onDismiss: (direction) async {
+                        if (direction == DismissDirection.endToStart) {
+                          // Store the context's mounted status before the async gap
+                          if (!context.mounted) return false;
 
-                        // Show dialog and await the result
-                        final bool? shouldDelete = await showDialog<bool>(
-                          context: context,
-                          builder: (BuildContext context) => AlertDialog(
-                            title: const Text('Delete Task'),
-                            content: const Text(
-                                'Are you sure you want to delete this task?'),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text(
-                                  'Cancel',
-                                  style: TextStyle(color: Colors.grey),
+                          // Show dialog and await the result
+                          final bool? shouldDelete = await showDialog<bool>(
+                            context: context,
+                            builder: (BuildContext context) => AlertDialog(
+                              title: const Text('Delete Task'),
+                              content: const Text(
+                                  'Are you sure you want to delete this task?'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text(
+                                    'Cancel',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
                                 ),
-                              ),
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, true),
-                                child: const Text('Delete',
-                                    style: TextStyle(color: Colors.red)),
-                              ),
-                            ],
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, true),
+                                  child: const Text('Delete',
+                                      style: TextStyle(color: Colors.red)),
+                                ),
+                              ],
+                            ),
+                          );
+
+                          if (shouldDelete == true) {
+                            // Check if context is still mounted before proceeding
+                            if (!context.mounted) return false;
+                            await _deleteTask(taskId);
+                            return true; // Confirm delete
+                          }
+                        }
+                        return false;
+                      },
+                      onTap: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => TaskDetails(
+                              taskTitle: task['title'],
+                              taskId: taskId,
+                            ),
                           ),
                         );
-
-                        if (shouldDelete == true) {
-                          // Check if context is still mounted before proceeding
-                          if (!context.mounted) return false;
-                          await _deleteTask(task['id']);
-                          return true; // Confirm delete
-                        }
-                      }
-                      return false;
-                    },
-                    onTap: () async {
-                      await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => TaskDetails(
-                            taskTitle: task['title'],
-                            taskId: task['id'],
-                          ),
-                        ),
-                      );
-                      // Reload categories and tasks after returning from TaskDetails
-                      _loadCategories();
-                      _loadTasks();
-                    },
-                    onStatusToggle: () =>
-                        _updateTaskStatus(task['id'], !task['done']),
-                    onEdit: () => _showAddTaskBottomSheet(task: task),
-                  );
-                },
-                onReorderItem: (int oldIndex, int newIndex) {
-                  // Prevent reordering if filtering is active or sorting is not custom or searching
-                  if (!_showCompleted ||
-                      _currentSortOption != SortOption.custom ||
-                      _selectedCategoryIds.isNotEmpty ||
-                      _selectedPriorities.isNotEmpty ||
-                      _searchQuery.isNotEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text(
-                              'Cannot reorder when filtered, sorted, or searching')),
+                        // Reload categories and tasks after returning from TaskDetails
+                        _loadCategories();
+                        _loadTasks();
+                      },
+                      onStatusToggle: () =>
+                          _updateTaskStatus(taskId, !task['done']),
+                      onEdit: () => _showAddTaskBottomSheet(task: task),
                     );
-                    return;
-                  }
-
-                  setState(() {
-                    // Adjust newIndex if moving an item with a lower index to a higher index
-                    if (oldIndex < newIndex) {
-                      newIndex -= 1;
+                  },
+                  onReorderItem: (int oldIndex, int newIndex) {
+                    // Prevent reordering if filtering is active or sorting is not custom or searching
+                    if (!_showCompleted ||
+                        _currentSortOption != SortOption.custom ||
+                        _selectedCategoryIds.isNotEmpty ||
+                        _selectedPriorities.isNotEmpty ||
+                        _selectionMode ||
+                        _searchQuery.isNotEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                            content: Text(
+                                'Cannot reorder when filtered, sorted, or searching')),
+                      );
+                      return;
                     }
 
-                    // Remove the item from the old index
-                    final Map<String, dynamic> movedTask =
-                        userTasks.removeAt(oldIndex);
+                    setState(() {
+                      // Adjust newIndex if moving an item with a lower index to a higher index
+                      if (oldIndex < newIndex) {
+                        newIndex -= 1;
+                      }
 
-                    // Insert the item at the new index
-                    userTasks.insert(newIndex, movedTask);
+                      // Remove the item from the old index
+                      final Map<String, dynamic> movedTask =
+                          userTasks.removeAt(oldIndex);
 
-                    // Update positions in database
-                    final updatedTasks = userTasks.asMap().entries.map((e) {
-                      return {
-                        'id': e.value['id'],
-                        'position': e.key,
-                      };
-                    }).toList();
+                      // Insert the item at the new index
+                      userTasks.insert(newIndex, movedTask);
 
-                    TaskDatabaseHelper.instance
-                        .updateTaskPositions(updatedTasks);
-                  });
-                },
-              ),
-            ],
+                      // Update positions in database
+                      final updatedTasks = userTasks.asMap().entries.map((e) {
+                        return {
+                          'id': e.value['id'],
+                          'position': e.key,
+                        };
+                      }).toList();
+
+                      TaskDatabaseHelper.instance
+                          .updateTaskPositions(updatedTasks);
+                    });
+                  },
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'homepage_add_task_fab',
-        backgroundColor: AppThemes.accentFor(isDarkMode),
-        onPressed: () => _showAddTaskBottomSheet(),
-        child: const Icon(Icons.add, color: Colors.white),
+        floatingActionButton: _selectionMode
+            ? null
+            : FloatingActionButton(
+                heroTag: 'homepage_add_task_fab',
+                backgroundColor: accent,
+                onPressed: () => _showAddTaskBottomSheet(),
+                child: const Icon(Icons.add, color: Colors.white),
+              ),
       ),
     );
   }
@@ -466,6 +734,7 @@ class _HomepageState extends State<Homepage> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     // Note: intentionally NOT closing TaskDatabaseHelper here anymore.
     // Homepage now lives inside MainNavigation's IndexedStack alongside the
     // Pomodoro tab, and both share the same TaskDatabaseHelper singleton, so

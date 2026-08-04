@@ -403,6 +403,17 @@ class TaskDatabaseHelper {
     );
   }
 
+  // Update task category (used by bulk "move to category" action)
+  Future<int> updateTaskCategory(int id, int? categoryId) async {
+    final db = await instance.database;
+    return await db.update(
+      'tasks',
+      {'category_id': categoryId},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
   // Delete a task
   Future<int> deleteTask(int id) async {
     final db = await instance.database;
