@@ -5,6 +5,7 @@ import 'package:locallists/features/lists/widgets/add_task_sheet.dart';
 import 'package:locallists/features/lists/widgets/filter_bottom_sheet.dart';
 import 'package:locallists/features/lists/widgets/task_list_item.dart';
 import 'package:locallists/features/settings/settings.dart';
+import 'package:locallists/features/task/task.dart';
 import 'package:locallists/services/notification_service.dart';
 import 'package:locallists/services/search_history.dart';
 import 'package:locallists/utils/theme.dart';
@@ -182,6 +183,7 @@ class _HomepageState extends State<Homepage> {
     await TaskDatabaseHelper.instance.updateTaskStatus(id, done);
     if (done) {
       await NotificationService.instance.cancelTaskNotification(id);
+      await _spawnNextRecurrenceIfNeeded(id);
     } else {
       // Re-schedule if unchecked? We'd need the due date.
       // For now, let's just cancel if done.
@@ -196,6 +198,57 @@ class _HomepageState extends State<Homepage> {
       }
     }
     await _loadTasks();
+  }
+
+  // When a recurring task is completed, spawn the next occurrence as a new
+  // task row (rather than mutating this one), so history/Pomodoro links on
+  // the completed task stay intact. The next due date is calculated from
+  // this task's own due date, not "now" - see RecurrenceRule.nextDueDate.
+  Future<void> _spawnNextRecurrenceIfNeeded(int completedTaskId) async {
+    final task =
+        await TaskDatabaseHelper.instance.getTaskWithSubtasks(completedTaskId);
+    if (task == null) return;
+
+    final rule = RecurrenceRule.fromJson(task['recurrence_rule']);
+    if (!rule.isActive) return;
+    if (task['due_date'] == null) return; // shouldn't happen, but be safe
+
+    final currentDue = DateTime.parse(task['due_date']);
+    final nextDue = rule.nextDueDate(currentDue);
+
+    final subtasks = (task['subtasks'] as List<dynamic>? ?? [])
+        .map((s) => {
+              'title': s['title'],
+              'done': false,
+            })
+        .toList();
+
+    final newTask = {
+      'title': task['title'],
+      'details': task['details'],
+      'done': false,
+      'due_date': nextDue.toIso8601String(),
+      'category_id': task['category_id'],
+      'position': task['position'],
+      'priority': task['priority'],
+      'recurrence_rule': task['recurrence_rule'],
+      'recurrence_parent_id': completedTaskId,
+      'subtasks': subtasks,
+    };
+
+    final newId =
+        await TaskDatabaseHelper.instance.saveTaskWithSubtasks(newTask, null);
+
+    // Only schedule a notification if the next due date carries a specific
+    // time (matches how due dates with just a date, no time, are handled
+    // elsewhere in the app).
+    if (nextDue.hour != 0 || nextDue.minute != 0) {
+      await NotificationService.instance.scheduleTaskNotification(
+        taskId: newId,
+        taskTitle: task['title'],
+        dueDateTime: nextDue,
+      );
+    }
   }
 
   // Delete a task

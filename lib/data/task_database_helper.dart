@@ -20,7 +20,7 @@ class TaskDatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7, // Bumped to 7 to add tasks.priority column
+      version: 8, // Bumped to 8 to add tasks.recurrence_rule/recurrence_parent_id
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -154,6 +154,21 @@ class TaskDatabaseHelper {
         }
       }
     }
+
+    if (oldVersion < 8) {
+      try {
+        await db.execute('ALTER TABLE tasks ADD COLUMN recurrence_rule TEXT');
+        await db.execute(
+            'ALTER TABLE tasks ADD COLUMN recurrence_parent_id INTEGER');
+        if (kDebugMode) {
+          print('Added recurrence columns to tasks table');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('Error adding recurrence columns (might already exist): $e');
+        }
+      }
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -170,7 +185,9 @@ class TaskDatabaseHelper {
         due_date TEXT,
         category_id INTEGER,
         position INTEGER,
-        priority INTEGER DEFAULT 0
+        priority INTEGER DEFAULT 0,
+        recurrence_rule TEXT,
+        recurrence_parent_id INTEGER
       )
     ''');
 
@@ -293,6 +310,7 @@ class TaskDatabaseHelper {
               'category_id': task['category_id'],
               'position': task['position'],
               'priority': task['priority'] ?? 0,
+              'recurrence_rule': task['recurrence_rule'],
             })
         .toList();
   }
@@ -329,6 +347,7 @@ class TaskDatabaseHelper {
       'category_id': tasks.first['category_id'],
       'position': tasks.first['position'],
       'priority': tasks.first['priority'] ?? 0,
+      'recurrence_rule': tasks.first['recurrence_rule'],
       'subtasks': subtasks
           .map((subtask) => {
                 'id': subtask['id'],
@@ -504,13 +523,13 @@ class TaskDatabaseHelper {
   /// Batch operations
 
   // Save task with its subtasks (create or update)
-  Future<void> saveTaskWithSubtasks(
+  Future<int> saveTaskWithSubtasks(
       Map<String, dynamic> task, int? taskId) async {
     final db = await instance.database;
 
     await db.transaction((transaction) async {
       // Insert or update the main task
-      if (taskId! > 0) {
+      if (taskId != null && taskId! > 0) {
         // Update existing task
         await transaction.update(
           'tasks',
@@ -522,6 +541,7 @@ class TaskDatabaseHelper {
             'category_id': task['category_id'],
             'position': task['position'],
             'priority': task['priority'] ?? 0,
+            'recurrence_rule': task['recurrence_rule'],
           },
           where: 'id = ?',
           whereArgs: [taskId],
@@ -538,6 +558,8 @@ class TaskDatabaseHelper {
             'category_id': task['category_id'],
             'position': task['position'],
             'priority': task['priority'] ?? 0,
+            'recurrence_rule': task['recurrence_rule'],
+            'recurrence_parent_id': task['recurrence_parent_id'],
           },
         );
       }
@@ -595,6 +617,8 @@ class TaskDatabaseHelper {
         }
       }
     });
+
+    return taskId!;
   }
 
   // CRUD for Categories
