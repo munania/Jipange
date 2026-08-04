@@ -5,7 +5,8 @@ import 'package:locallists/data/task_database_helper.dart';
 import 'package:locallists/features/pomodoro/pomodoro_analytics_screen.dart';
 import 'package:locallists/services/notification_service.dart';
 import 'package:locallists/services/pomodoro_settings.dart';
-import 'package:locallists/utils/theme.dart';
+import 'package:locallists/services/pomodoro_settings_notifier.dart';
+import 'package:provider/provider.dart';
 
 enum PomodoroSessionType { work, shortBreak, longBreak }
 
@@ -41,31 +42,42 @@ class PomodoroScreen extends StatefulWidget {
   State<PomodoroScreen> createState() => _PomodoroScreenState();
 }
 
-class _PomodoroScreenState extends State<PomodoroScreen> {
-  PomodoroSettings _settings = const PomodoroSettings();
+class _PomodoroScreenState extends State<PomodoroScreen>
+    with SingleTickerProviderStateMixin {
   PomodoroSessionType _currentType = PomodoroSessionType.work;
   int _totalSeconds = 25 * 60;
   int _remainingSeconds = 25 * 60;
   bool _isRunning = false;
   int _completedWorkSessions = 0;
   Timer? _timer;
-  bool _isLoading = true;
+  PomodoroSettings? _lastAppliedSettings;
+
+  late final AnimationController _pulseController;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
   }
 
-  Future<void> _loadSettings() async {
-    final settings = await PomodoroSettings.load();
-    if (!mounted) return;
-    setState(() {
-      _settings = settings;
-      _totalSeconds = _durationFor(_currentType, settings);
-      _remainingSeconds = _totalSeconds;
-      _isLoading = false;
-    });
+  // Applies the latest settings from the notifier. Only touches the active
+  // countdown when the timer is at rest, so a change never yanks time out
+  // from under a session that's actively running.
+  void _applySettings(PomodoroSettings settings) {
+    final isFirstLoad = _lastAppliedSettings == null;
+    _lastAppliedSettings = settings;
+    if (_isRunning) return;
+
+    final newDuration = _durationFor(_currentType, settings);
+    if (isFirstLoad || newDuration != _totalSeconds) {
+      setState(() {
+        _totalSeconds = newDuration;
+        _remainingSeconds = newDuration;
+      });
+    }
   }
 
   int _durationFor(PomodoroSessionType type, PomodoroSettings settings) {
@@ -79,14 +91,14 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     }
   }
 
-  Color _colorFor(PomodoroSessionType type, bool isDarkMode) {
+  Color _colorFor(PomodoroSessionType type) {
     switch (type) {
       case PomodoroSessionType.work:
-        return isDarkMode ? AppThemes.lightSecondary : AppThemes.darkPrimary;
+        return const Color(0xFF7C86F5); // indigo - focus
       case PomodoroSessionType.shortBreak:
-        return const Color(0xFF4CAF50);
+        return const Color(0xFF4CAF50); // green - short break
       case PomodoroSessionType.longBreak:
-        return const Color(0xFF2196F3);
+        return const Color(0xFF2196F3); // blue - long break
     }
   }
 
@@ -100,6 +112,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   void _startTimer() {
     setState(() => _isRunning = true);
+    _pulseController.repeat(reverse: true);
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_remainingSeconds <= 1) {
         timer.cancel();
@@ -112,11 +125,13 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   void _pauseTimer() {
     _timer?.cancel();
+    _pulseController.stop();
     setState(() => _isRunning = false);
   }
 
   void _resetTimer() {
     _timer?.cancel();
+    _pulseController.stop();
     setState(() {
       _isRunning = false;
       _remainingSeconds = _totalSeconds;
@@ -126,6 +141,9 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   Future<void> _onSessionComplete() async {
     final completedType = _currentType;
     final completedDuration = _totalSeconds;
+    final settings = _lastAppliedSettings ?? const PomodoroSettings();
+
+    _pulseController.stop();
 
     // Persist the completed session
     await TaskDatabaseHelper.instance.insertPomodoroSession(
@@ -150,7 +168,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
     if (completedType == PomodoroSessionType.work) {
       nextCompletedWorkSessions++;
       final isLongBreakDue =
-          nextCompletedWorkSessions % _settings.sessionsBeforeLongBreak == 0;
+          nextCompletedWorkSessions % settings.sessionsBeforeLongBreak == 0;
       nextType = isLongBreakDue
           ? PomodoroSessionType.longBreak
           : PomodoroSessionType.shortBreak;
@@ -158,10 +176,10 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
       nextType = PomodoroSessionType.work;
     }
 
-    final nextDuration = _durationFor(nextType, _settings);
+    final nextDuration = _durationFor(nextType, settings);
     final shouldAutoStart = completedType == PomodoroSessionType.work
-        ? _settings.autoStartBreaks
-        : _settings.autoStartWork;
+        ? settings.autoStartBreaks
+        : settings.autoStartWork;
 
     if (!mounted) return;
     setState(() {
@@ -179,9 +197,10 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
 
   void _switchType(PomodoroSessionType type) {
     if (_isRunning) return; // avoid switching mid-run to keep data clean
+    final settings = _lastAppliedSettings ?? const PomodoroSettings();
     setState(() {
       _currentType = type;
-      _totalSeconds = _durationFor(type, _settings);
+      _totalSeconds = _durationFor(type, settings);
       _remainingSeconds = _totalSeconds;
     });
   }
@@ -195,13 +214,20 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _pulseController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final color = _colorFor(_currentType, isDarkMode);
+    // Watching this rebuilds the timer live whenever settings change
+    // elsewhere in the app - no restart needed.
+    final settings = context.watch<PomodoroSettingsNotifier>().settings;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _applySettings(settings);
+    });
+
+    final color = _colorFor(_currentType);
     final progress =
         _totalSeconds == 0 ? 0.0 : 1 - (_remainingSeconds / _totalSeconds);
 
@@ -210,7 +236,7 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
         title: const Text('Pomodoro'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.bar_chart),
+            icon: const Icon(Icons.bar_chart_rounded),
             tooltip: 'Analytics',
             onPressed: () {
               Navigator.push(
@@ -223,149 +249,185 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
           ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SafeArea(
-              child: Column(
-                children: [
-                  const SizedBox(height: 16),
-                  // Session type switcher
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: PomodoroSessionType.values.map((type) {
-                        final isSelected = type == _currentType;
-                        return Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 4),
-                            child: GestureDetector(
-                              onTap: () => _switchType(type),
-                              child: Container(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? color.withValues(alpha: 0.15)
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(
-                                    color: isSelected
-                                        ? color
-                                        : Colors.grey.withValues(alpha: 0.4),
-                                  ),
-                                ),
-                                alignment: Alignment.center,
-                                child: Text(
-                                  type.label,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                    color: isSelected ? color : Colors.grey,
-                                  ),
-                                ),
-                              ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const SizedBox(height: 16),
+            // Session type switcher - each option has a strongly
+            // contrasted, distinctly colored selected state.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: PomodoroSessionType.values.map((type) {
+                  final isSelected = type == _currentType;
+                  final typeColor = _colorFor(type);
+                  return Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: GestureDetector(
+                        onTap: () => _switchType(type),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeOut,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isSelected ? typeColor : Colors.transparent,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: isSelected
+                                  ? typeColor
+                                  : Colors.grey.withValues(alpha: 0.4),
+                              width: isSelected ? 0 : 1,
+                            ),
+                            boxShadow: isSelected
+                                ? [
+                                    BoxShadow(
+                                      color: typeColor.withValues(alpha: 0.35),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: AnimatedDefaultTextStyle(
+                            duration: const Duration(milliseconds: 250),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: isSelected ? Colors.white : Colors.grey,
+                            ),
+                            textAlign: TextAlign.center,
+                            child: Text(type.label, textAlign: TextAlign.center),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            Expanded(
+              child: Center(
+                child: AnimatedBuilder(
+                  animation: _pulseController,
+                  builder: (context, child) {
+                    final pulse = _isRunning
+                        ? 1.0 + (_pulseController.value * 0.02)
+                        : 1.0;
+                    return Transform.scale(scale: pulse, child: child);
+                  },
+                  child: SizedBox(
+                    width: 260,
+                    height: 260,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        TweenAnimationBuilder<double>(
+                          tween: Tween(begin: 0, end: progress.clamp(0.0, 1.0)),
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeOut,
+                          builder: (context, value, _) => SizedBox(
+                            width: 260,
+                            height: 260,
+                            child: CircularProgressIndicator(
+                              value: value,
+                              strokeWidth: 10,
+                              backgroundColor: color.withValues(alpha: 0.15),
+                              valueColor: AlwaysStoppedAnimation<Color>(color),
                             ),
                           ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: SizedBox(
-                        width: 260,
-                        height: 260,
-                        child: Stack(
-                          alignment: Alignment.center,
+                        ),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            SizedBox(
-                              width: 260,
-                              height: 260,
-                              child: CircularProgressIndicator(
-                                value: progress.clamp(0.0, 1.0),
-                                strokeWidth: 10,
-                                backgroundColor:
-                                    color.withValues(alpha: 0.15),
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(color),
+                            Text(
+                              _formattedTime,
+                              style: const TextStyle(
+                                fontSize: 48,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
-                            Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  _formattedTime,
-                                  style: const TextStyle(
-                                    fontSize: 48,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                            const SizedBox(height: 8),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 250),
+                              child: Text(
+                                _currentType.label,
+                                key: ValueKey(_currentType),
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  color: color,
+                                  fontWeight: FontWeight.w700,
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _currentType.label,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: color,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           ],
                         ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Text(
+              'Session ${(_completedWorkSessions % (_lastAppliedSettings?.sessionsBeforeLongBreak ?? 4)) + (_currentType == PomodoroSessionType.work ? 1 : 0)} '
+              'of ${_lastAppliedSettings?.sessionsBeforeLongBreak ?? 4}',
+              style: const TextStyle(color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  iconSize: 32,
+                  icon: const Icon(Icons.replay),
+                  tooltip: 'Reset',
+                  onPressed: _resetTimer,
+                ),
+                const SizedBox(width: 24),
+                AnimatedScale(
+                  scale: _isRunning ? 1.0 : 1.05,
+                  duration: const Duration(milliseconds: 200),
+                  child: FloatingActionButton(
+                    heroTag: 'pomodoro_toggle_fab',
+                    backgroundColor: color,
+                    onPressed: _toggleTimer,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      transitionBuilder: (child, animation) =>
+                          ScaleTransition(scale: animation, child: child),
+                      child: Icon(
+                        _isRunning ? Icons.pause : Icons.play_arrow,
+                        key: ValueKey(_isRunning),
+                        color: Colors.white,
                       ),
                     ),
                   ),
-                  Text(
-                    'Session ${(_completedWorkSessions % _settings.sessionsBeforeLongBreak) + (_currentType == PomodoroSessionType.work ? 1 : 0)} '
-                    'of ${_settings.sessionsBeforeLongBreak}',
-                    style: const TextStyle(color: Colors.grey),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      IconButton(
-                        iconSize: 32,
-                        icon: const Icon(Icons.replay),
-                        tooltip: 'Reset',
-                        onPressed: _resetTimer,
-                      ),
-                      const SizedBox(width: 24),
-                      FloatingActionButton(
-                        backgroundColor: color,
-                        onPressed: _toggleTimer,
-                        child: Icon(
-                          _isRunning ? Icons.pause : Icons.play_arrow,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 24),
-                      IconButton(
-                        iconSize: 32,
-                        icon: const Icon(Icons.skip_next),
-                        tooltip: 'Skip',
-                        onPressed: () {
-                          _timer?.cancel();
-                          setState(() => _isRunning = false);
-                          _onSessionSkipped();
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 32),
-                ],
-              ),
+                ),
+                const SizedBox(width: 24),
+                IconButton(
+                  iconSize: 32,
+                  icon: const Icon(Icons.skip_next),
+                  tooltip: 'Skip',
+                  onPressed: () {
+                    _timer?.cancel();
+                    _pulseController.stop();
+                    setState(() => _isRunning = false);
+                    _onSessionSkipped();
+                  },
+                ),
+              ],
             ),
+            const SizedBox(height: 32),
+          ],
+        ),
+      ),
     );
   }
 
   void _onSessionSkipped() {
     // Skipping doesn't record a completed session, just advances the cycle.
+    final settings = _lastAppliedSettings ?? const PomodoroSettings();
     PomodoroSessionType nextType;
-    int nextCompletedWorkSessions = _completedWorkSessions;
 
     if (_currentType == PomodoroSessionType.work) {
       nextType = PomodoroSessionType.shortBreak;
@@ -373,9 +435,8 @@ class _PomodoroScreenState extends State<PomodoroScreen> {
       nextType = PomodoroSessionType.work;
     }
 
-    final nextDuration = _durationFor(nextType, _settings);
+    final nextDuration = _durationFor(nextType, settings);
     setState(() {
-      _completedWorkSessions = nextCompletedWorkSessions;
       _currentType = nextType;
       _totalSeconds = nextDuration;
       _remainingSeconds = nextDuration;

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:locallists/data/task_database_helper.dart';
 import 'package:locallists/features/lists/task_details.dart';
 import 'package:locallists/features/lists/widgets/add_task_sheet.dart';
 import 'package:locallists/features/lists/widgets/filter_bottom_sheet.dart';
@@ -7,7 +8,6 @@ import 'package:locallists/features/settings/settings.dart';
 import 'package:locallists/services/notification_service.dart';
 import 'package:locallists/utils/theme.dart';
 
-import '../../data/task_database_helper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class Homepage extends StatefulWidget {
@@ -17,7 +17,7 @@ class Homepage extends StatefulWidget {
   State<Homepage> createState() => _HomepageState();
 }
 
-enum SortOption { custom, dateCreated, dueDate, alphabetical }
+enum SortOption { custom, dateCreated, dueDate, alphabetical, priority }
 
 class _HomepageState extends State<Homepage> {
   List<Map<String, dynamic>> userTasks = [];
@@ -27,6 +27,7 @@ class _HomepageState extends State<Homepage> {
   String _searchQuery = '';
   SortOption _currentSortOption = SortOption.custom;
   Set<int> _selectedCategoryIds = {};
+  Set<int> _selectedPriorities = {};
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -72,6 +73,9 @@ class _HomepageState extends State<Homepage> {
       case SortOption.alphabetical:
         orderBy = 'title ASC';
         break;
+      case SortOption.priority:
+        orderBy = 'priority DESC';
+        break;
       case SortOption.custom:
         orderBy = 'position ASC';
         break;
@@ -84,6 +88,8 @@ class _HomepageState extends State<Homepage> {
         categoryIds: _selectedCategoryIds.isEmpty
             ? null
             : _selectedCategoryIds.toList(),
+        priorities:
+            _selectedPriorities.isEmpty ? null : _selectedPriorities.toList(),
       );
 
       setState(() {
@@ -104,6 +110,9 @@ class _HomepageState extends State<Homepage> {
             categoryIds: _selectedCategoryIds.isEmpty
                 ? null
                 : _selectedCategoryIds.toList(),
+            priorities: _selectedPriorities.isEmpty
+                ? null
+                : _selectedPriorities.toList(),
           );
           setState(() {
             if (_showCompleted) {
@@ -200,7 +209,7 @@ class _HomepageState extends State<Homepage> {
     );
   }
 
-  // Show bottom sheet with sort/filter/show-completed options
+  // Show bottom sheet with sort/filter options
   void _showFilterSheet() {
     showModalBottomSheet(
       context: context,
@@ -213,7 +222,7 @@ class _HomepageState extends State<Homepage> {
           categoriesMap: _categoriesMap,
           currentSort: _currentSortOption,
           selectedCategoryIds: _selectedCategoryIds,
-          showCompleted: _showCompleted,
+          selectedPriorities: _selectedPriorities,
           isDarkMode: isDarkMode(context),
           onSortChanged: (sort) {
             setState(() => _currentSortOption = sort);
@@ -223,15 +232,21 @@ class _HomepageState extends State<Homepage> {
             setState(() => _selectedCategoryIds = categoryIds);
             _loadTasks();
           },
-          onShowCompletedChanged: (value) async {
-            final prefs = await SharedPreferences.getInstance();
-            setState(() => _showCompleted = value);
-            await prefs.setBool('showCompleted', value);
+          onPrioritiesChanged: (priorities) {
+            setState(() => _selectedPriorities = priorities);
             _loadTasks();
           },
         );
       },
     );
+  }
+
+  // Toggle whether finished tasks are shown, persisted across launches
+  Future<void> _toggleShowCompleted() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => _showCompleted = !_showCompleted);
+    await prefs.setBool('showCompleted', _showCompleted);
+    _loadTasks();
   }
 
   @override
@@ -277,11 +292,17 @@ class _HomepageState extends State<Homepage> {
             },
           ),
           IconButton(
+            icon:
+                Icon(_showCompleted ? Icons.visibility : Icons.visibility_off),
+            tooltip: _showCompleted ? 'Hide finished tasks' : 'Show finished tasks',
+            onPressed: _toggleShowCompleted,
+          ),
+          IconButton(
             icon: Icon(
-              Icons.filter_list,
+              Icons.tune,
               color: _selectedCategoryIds.isNotEmpty ||
-                      _currentSortOption != SortOption.custom ||
-                      !_showCompleted
+                      _selectedPriorities.isNotEmpty ||
+                      _currentSortOption != SortOption.custom
                   ? (isDarkMode
                       ? AppThemes.lightSecondary
                       : AppThemes.darkPrimary)
@@ -311,7 +332,7 @@ class _HomepageState extends State<Homepage> {
       body: SingleChildScrollView(
         child: Padding(
           padding:
-              const EdgeInsets.only(left: 16.0, right: 16, top: 16, bottom: 70),
+              const EdgeInsets.only(left: 16.0, right: 16, top: 16, bottom: 100),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -388,11 +409,12 @@ class _HomepageState extends State<Homepage> {
                     onEdit: () => _showAddTaskBottomSheet(task: task),
                   );
                 },
-                onReorder: (int oldIndex, int newIndex) {
+                onReorderItem: (int oldIndex, int newIndex) {
                   // Prevent reordering if filtering is active or sorting is not custom or searching
                   if (!_showCompleted ||
                       _currentSortOption != SortOption.custom ||
                       _selectedCategoryIds.isNotEmpty ||
+                      _selectedPriorities.isNotEmpty ||
                       _searchQuery.isNotEmpty) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -433,12 +455,10 @@ class _HomepageState extends State<Homepage> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.blue,
+        heroTag: 'homepage_add_task_fab',
+        backgroundColor: AppThemes.accentFor(isDarkMode),
         onPressed: () => _showAddTaskBottomSheet(),
-        child: Icon(Icons.add,
-            color: isDarkMode
-                ? AppThemes.lightSecondary
-                : AppThemes.lightSecondary),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
     );
   }

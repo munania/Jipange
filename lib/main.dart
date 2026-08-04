@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_state_notifier/flutter_state_notifier.dart';
 import 'package:locallists/features/splash_screen/splash_screen.dart';
 import 'package:locallists/services/notification_service.dart';
+import 'package:locallists/services/pomodoro_settings_notifier.dart';
 import 'package:locallists/services/theme_notifier.dart';
 import 'package:locallists/utils/theme.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +18,9 @@ void main() async {
       providers: [
         StateNotifierProvider<ThemeNotifier, ThemeMode>(
           create: (context) => ThemeNotifier(),
+        ),
+        ChangeNotifierProvider<PomodoroSettingsNotifier>(
+          create: (context) => PomodoroSettingsNotifier(),
         ),
       ],
       child: const MyApp(),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -19,14 +20,16 @@ class TaskDatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6, // Bumped to 6 to add pomodoro_sessions table
+      version: 7, // Bumped to 7 to add tasks.priority column
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    print('Upgrading database from $oldVersion to $newVersion');
+    if (kDebugMode) {
+      print('Upgrading database from $oldVersion to $newVersion');
+    }
 
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE tasks ADD COLUMN due_date TEXT');
@@ -56,16 +59,24 @@ class TaskDatabaseHelper {
       // Add category_id to tasks table
       try {
         await db.execute('ALTER TABLE tasks ADD COLUMN category_id INTEGER');
-        print('Added category_id column');
+        if (kDebugMode) {
+          print('Added category_id column');
+        }
       } catch (e) {
-        print('Error adding category_id (might already exist): $e');
+        if (kDebugMode) {
+          print('Error adding category_id (might already exist): $e');
+        }
       }
 
       try {
         await db.execute('ALTER TABLE tasks ADD COLUMN position INTEGER');
-        print('Added position column');
+        if (kDebugMode) {
+          print('Added position column');
+        }
       } catch (e) {
-        print('Error adding position (might already exist): $e');
+        if (kDebugMode) {
+          print('Error adding position (might already exist): $e');
+        }
       }
 
       // Create categories table
@@ -78,7 +89,9 @@ class TaskDatabaseHelper {
             icon INTEGER
           )
         ''');
-        print('Created categories table');
+        if (kDebugMode) {
+          print('Created categories table');
+        }
 
         // Insert default categories only if table was just created
         await db.insert('categories', {
@@ -96,9 +109,13 @@ class TaskDatabaseHelper {
           'color': 0xFFFF9800, // Colors.orange.value
           'icon': 58780, // Icons.shopping_cart.codePoint
         });
-        print('Inserted default categories');
+        if (kDebugMode) {
+          print('Inserted default categories');
+        }
       } catch (e) {
-        print('Error creating categories table (might already exist): $e');
+        if (kDebugMode) {
+          print('Error creating categories table (might already exist): $e');
+        }
       }
     }
 
@@ -114,9 +131,27 @@ class TaskDatabaseHelper {
             FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE SET NULL
           )
         ''');
-        print('Created pomodoro_sessions table');
+        if (kDebugMode) {
+          print('Created pomodoro_sessions table');
+        }
       } catch (e) {
-        print('Error creating pomodoro_sessions table (might already exist): $e');
+        if (kDebugMode) {
+          print('Error creating pomodoro_sessions table (might already exist): $e');
+        }
+      }
+    }
+
+    if (oldVersion < 7) {
+      try {
+        await db.execute(
+            'ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 0');
+        if (kDebugMode) {
+          print('Added priority column to tasks table');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('Error adding priority column (might already exist): $e');
+        }
       }
     }
   }
@@ -134,7 +169,8 @@ class TaskDatabaseHelper {
         done INTEGER,
         due_date TEXT,
         category_id INTEGER,
-        position INTEGER
+        position INTEGER,
+        priority INTEGER DEFAULT 0
       )
     ''');
 
@@ -213,6 +249,7 @@ class TaskDatabaseHelper {
     String? searchQuery,
     String? orderBy,
     List<int>? categoryIds,
+    List<int>? priorities,
   }) async {
     final db = await instance.database;
 
@@ -228,6 +265,12 @@ class TaskDatabaseHelper {
       final placeholders = List.filled(categoryIds.length, '?').join(', ');
       whereClauses.add('category_id IN ($placeholders)');
       whereArgs.addAll(categoryIds);
+    }
+
+    if (priorities != null && priorities.isNotEmpty) {
+      final placeholders = List.filled(priorities.length, '?').join(', ');
+      whereClauses.add('priority IN ($placeholders)');
+      whereArgs.addAll(priorities);
     }
 
     final String? where =
@@ -249,6 +292,7 @@ class TaskDatabaseHelper {
               'due_date': task['due_date'],
               'category_id': task['category_id'],
               'position': task['position'],
+              'priority': task['priority'] ?? 0,
             })
         .toList();
   }
@@ -284,6 +328,7 @@ class TaskDatabaseHelper {
       'due_date': tasks.first['due_date'],
       'category_id': tasks.first['category_id'],
       'position': tasks.first['position'],
+      'priority': tasks.first['priority'] ?? 0,
       'subtasks': subtasks
           .map((subtask) => {
                 'id': subtask['id'],
@@ -465,6 +510,7 @@ class TaskDatabaseHelper {
             'due_date': task['due_date'],
             'category_id': task['category_id'],
             'position': task['position'],
+            'priority': task['priority'] ?? 0,
           },
           where: 'id = ?',
           whereArgs: [taskId],
@@ -480,6 +526,7 @@ class TaskDatabaseHelper {
             'due_date': task['due_date'],
             'category_id': task['category_id'],
             'position': task['position'],
+            'priority': task['priority'] ?? 0,
           },
         );
       }

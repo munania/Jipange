@@ -183,7 +183,7 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
           const SizedBox(height: 16),
           // Category Dropdown
           DropdownButtonFormField<int>(
-            value: selectedCategoryId,
+            initialValue: selectedCategoryId,
             decoration: const InputDecoration(
               labelText: 'Category',
               border: OutlineInputBorder(),
@@ -282,11 +282,13 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
                 Navigator.pop(context);
               }
             },
-            child: Text(widget.task != null ? 'Save Changes' : 'Add Task',
-                style: TextStyle(
-                    color: widget.isDarkMode
-                        ? AppThemes.lightSecondary
-                        : AppThemes.lightSecondary)),
+            child: Text(
+              widget.task != null ? 'Save Changes' : 'Add Task',
+              style: TextStyle(
+                  color: widget.isDarkMode
+                      ? AppThemes.lightPrimary
+                      : AppThemes.lightPrimary),
+            ),
           ),
           const SizedBox(height: 16),
         ],

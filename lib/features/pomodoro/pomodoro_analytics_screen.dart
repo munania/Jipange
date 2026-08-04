@@ -16,14 +16,48 @@ extension on _Period {
         return 'Yearly';
     }
   }
+
+  IconData get icon {
+    switch (this) {
+      case _Period.daily:
+        return Icons.today_rounded;
+      case _Period.weekly:
+        return Icons.view_week_rounded;
+      case _Period.monthly:
+        return Icons.calendar_month_rounded;
+      case _Period.yearly:
+        return Icons.auto_graph_rounded;
+    }
+  }
+
+  // Each period gets its own signature color so switching tabs feels
+  // distinct and high-contrast rather than a single flat accent everywhere.
+  Color get color {
+    switch (this) {
+      case _Period.daily:
+        return const Color(0xFF7C86F5); // indigo
+      case _Period.weekly:
+        return const Color(0xFF19B3A6); // teal
+      case _Period.monthly:
+        return const Color(0xFFEF8B3B); // orange
+      case _Period.yearly:
+        return const Color(0xFFE5548C); // pink
+    }
+  }
 }
 
 class _Bucket {
   final String label;
   final double minutes;
+  final int sessionCount;
   final bool isCurrent;
 
-  _Bucket({required this.label, required this.minutes, this.isCurrent = false});
+  _Bucket({
+    required this.label,
+    required this.minutes,
+    required this.sessionCount,
+    this.isCurrent = false,
+  });
 }
 
 class PomodoroAnalyticsScreen extends StatefulWidget {
@@ -54,12 +88,12 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
   ];
   static const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-  void _onChipTapped(_Period period) {
+  void _onTabTapped(_Period period) {
     setState(() => _selectedPeriod = period);
     _pageController.animateToPage(
       _Period.values.indexOf(period),
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeInOut,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
     );
   }
 
@@ -71,6 +105,8 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Focus Analytics'),
@@ -80,20 +116,10 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: _Period.values.map((period) {
-                final isSelected = period == _selectedPeriod;
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ChoiceChip(
-                      label: Text(period.label),
-                      selected: isSelected,
-                      onSelected: (_) => _onChipTapped(period),
-                    ),
-                  ),
-                );
-              }).toList(),
+            child: _PeriodTabBar(
+              selected: _selectedPeriod,
+              isDarkMode: isDarkMode,
+              onSelected: _onTabTapped,
             ),
           ),
           const SizedBox(height: 8),
@@ -106,27 +132,27 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
               children: [
                 _PeriodStatsView(
                   key: const ValueKey('daily'),
+                  period: _Period.daily,
                   loader: _loadDailyBuckets,
                   totalLabel: "Today's focus time",
-                  totalMinutes: _todayTotalMinutesLoader,
                 ),
                 _PeriodStatsView(
                   key: const ValueKey('weekly'),
+                  period: _Period.weekly,
                   loader: _loadWeeklyBuckets,
                   totalLabel: "This week's focus time",
-                  totalMinutes: _weekTotalMinutesLoader,
                 ),
                 _PeriodStatsView(
                   key: const ValueKey('monthly'),
+                  period: _Period.monthly,
                   loader: _loadMonthlyBuckets,
                   totalLabel: "This month's focus time",
-                  totalMinutes: _monthTotalMinutesLoader,
                 ),
                 _PeriodStatsView(
                   key: const ValueKey('yearly'),
+                  period: _Period.yearly,
                   loader: _loadYearlyBuckets,
                   totalLabel: "This year's focus time",
-                  totalMinutes: _yearTotalMinutesLoader,
                 ),
               ],
             ),
@@ -171,18 +197,11 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
       buckets.add(_Bucket(
         label: _weekdayNames[day.weekday - 1],
         minutes: _sumMinutes(daySessions),
+        sessionCount: daySessions.length,
         isCurrent: day == today,
       ));
     }
     return buckets;
-  }
-
-  Future<double> _todayTotalMinutesLoader() async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final tomorrow = today.add(const Duration(days: 1));
-    final sessions = await _fetchWorkSessions(today, tomorrow);
-    return _sumMinutes(sessions);
   }
 
   // Current week (Mon-Sun), bucketed by day
@@ -204,19 +223,11 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
       buckets.add(_Bucket(
         label: _weekdayNames[i],
         minutes: _sumMinutes(daySessions),
+        sessionCount: daySessions.length,
         isCurrent: day == today,
       ));
     }
     return buckets;
-  }
-
-  Future<double> _weekTotalMinutesLoader() async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final monday = today.subtract(Duration(days: today.weekday - 1));
-    final nextMonday = monday.add(const Duration(days: 7));
-    final sessions = await _fetchWorkSessions(monday, nextMonday);
-    return _sumMinutes(sessions);
   }
 
   // Current month, bucketed by week-of-month (up to 5 buckets)
@@ -247,18 +258,11 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
       buckets.add(_Bucket(
         label: 'W${w + 1}',
         minutes: _sumMinutes(weekSessions),
+        sessionCount: weekSessions.length,
         isCurrent: isCurrentWeek,
       ));
     }
     return buckets;
-  }
-
-  Future<double> _monthTotalMinutesLoader() async {
-    final now = DateTime.now();
-    final firstOfMonth = DateTime(now.year, now.month, 1);
-    final firstOfNextMonth = DateTime(now.year, now.month + 1, 1);
-    final sessions = await _fetchWorkSessions(firstOfMonth, firstOfNextMonth);
-    return _sumMinutes(sessions);
   }
 
   // Current year, bucketed by month
@@ -279,31 +283,127 @@ class _PomodoroAnalyticsScreenState extends State<PomodoroAnalyticsScreen> {
       buckets.add(_Bucket(
         label: _monthNames[m - 1],
         minutes: _sumMinutes(monthSessions),
+        sessionCount: monthSessions.length,
         isCurrent: m == now.month,
       ));
     }
     return buckets;
   }
+}
 
-  Future<double> _yearTotalMinutesLoader() async {
-    final now = DateTime.now();
-    final firstOfYear = DateTime(now.year, 1, 1);
-    final firstOfNextYear = DateTime(now.year + 1, 1, 1);
-    final sessions = await _fetchWorkSessions(firstOfYear, firstOfNextYear);
-    return _sumMinutes(sessions);
+/// Segmented control across the top with a sliding, brightly colored
+/// indicator so the active period is unmistakable against the others.
+class _PeriodTabBar extends StatelessWidget {
+  final _Period selected;
+  final bool isDarkMode;
+  final ValueChanged<_Period> onSelected;
+
+  const _PeriodTabBar({
+    required this.selected,
+    required this.isDarkMode,
+    required this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final trackColor =
+        isDarkMode ? const Color(0xFF22252C) : const Color(0xFFE9EAF0);
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: trackColor,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = constraints.maxWidth / _Period.values.length;
+          final selectedIndex = _Period.values.indexOf(selected);
+          return Stack(
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutCubic,
+                left: tabWidth * selectedIndex,
+                width: tabWidth,
+                top: 0,
+                bottom: 0,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    color: selected.color,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: selected.color.withValues(alpha: 0.4),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Row(
+                children: _Period.values.map((period) {
+                  final isSelected = period == selected;
+                  return Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => onSelected(period),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              period.icon,
+                              size: 18,
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDarkMode
+                                      ? Colors.grey[400]
+                                      : Colors.grey[600]),
+                            ),
+                            const SizedBox(height: 3),
+                            AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 220),
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: isSelected
+                                    ? Colors.white
+                                    : (isDarkMode
+                                        ? Colors.grey[400]
+                                        : Colors.grey[600]),
+                              ),
+                              child: Text(period.label),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 }
 
-/// A single swipeable page showing a bar chart + summary for one period.
+/// A single swipeable page showing a gradient summary card + bar chart for
+/// one period, colored with that period's signature color.
 class _PeriodStatsView extends StatelessWidget {
+  final _Period period;
   final Future<List<_Bucket>> Function() loader;
-  final Future<double> Function() totalMinutes;
   final String totalLabel;
 
   const _PeriodStatsView({
     super.key,
+    required this.period,
     required this.loader,
-    required this.totalMinutes,
     required this.totalLabel,
   });
 
@@ -319,45 +419,101 @@ class _PeriodStatsView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: Future.wait([loader(), totalMinutes()]),
+    final color = period.color;
+
+    return FutureBuilder<List<_Bucket>>(
+      future: loader(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return Center(
+            child: CircularProgressIndicator(color: color),
+          );
         }
 
-        final buckets = snapshot.data![0] as List<_Bucket>;
-        final total = snapshot.data![1] as double;
+        final buckets = snapshot.data!;
+        final totalMinutes =
+            buckets.fold<double>(0, (sum, b) => sum + b.minutes);
+        final totalSessions =
+            buckets.fold<int>(0, (sum, b) => sum + b.sessionCount);
         final maxMinutes = buckets.isEmpty
             ? 1.0
             : buckets
                 .map((b) => b.minutes)
                 .fold<double>(1.0, (a, b) => b > a ? b : a);
 
-        final primaryColor = Theme.of(context).colorScheme.primary;
-
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        totalLabel,
-                        style: Theme.of(context).textTheme.bodyMedium,
+              // Gradient summary card
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0, end: 1),
+                duration: const Duration(milliseconds: 400),
+                builder: (context, value, child) => Opacity(
+                  opacity: value,
+                  child: Transform.translate(
+                    offset: Offset(0, (1 - value) * 12),
+                    child: child,
+                  ),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [color, color.withValues(alpha: 0.7)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: color.withValues(alpha: 0.35),
+                        blurRadius: 16,
+                        offset: const Offset(0, 8),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatMinutes(total),
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            totalLabel,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _formatMinutes(totalMinutes),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 30,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$totalSessions session${totalSessions == 1 ? '' : 's'} completed',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
                         ),
+                        child: Icon(period.icon, color: Colors.white, size: 28),
                       ),
                     ],
                   ),
@@ -382,20 +538,40 @@ class _PeriodStatsView extends StatelessWidget {
                               bucket.minutes > 0
                                   ? bucket.minutes.round().toString()
                                   : '',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 10,
-                                color: Colors.grey,
+                                fontWeight: FontWeight.w600,
+                                color: bucket.isCurrent
+                                    ? color
+                                    : Colors.grey,
                               ),
                             ),
                             const SizedBox(height: 4),
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 300),
-                              height: barHeight.clamp(4.0, 160.0),
-                              decoration: BoxDecoration(
-                                color: bucket.isCurrent
-                                    ? primaryColor
-                                    : primaryColor.withValues(alpha: 0.4),
-                                borderRadius: BorderRadius.circular(4),
+                            TweenAnimationBuilder<double>(
+                              tween: Tween(
+                                begin: 0,
+                                end: barHeight.clamp(4.0, 160.0),
+                              ),
+                              duration: const Duration(milliseconds: 500),
+                              curve: Curves.easeOutCubic,
+                              builder: (context, height, child) => Container(
+                                height: height,
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: bucket.isCurrent
+                                        ? [
+                                            color,
+                                            color.withValues(alpha: 0.7),
+                                          ]
+                                        : [
+                                            color.withValues(alpha: 0.35),
+                                            color.withValues(alpha: 0.2),
+                                          ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
                               ),
                             ),
                             const SizedBox(height: 6),
@@ -406,6 +582,7 @@ class _PeriodStatsView extends StatelessWidget {
                                 fontWeight: bucket.isCurrent
                                     ? FontWeight.bold
                                     : FontWeight.normal,
+                                color: bucket.isCurrent ? color : null,
                               ),
                             ),
                           ],
