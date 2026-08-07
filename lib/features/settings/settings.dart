@@ -1,6 +1,7 @@
 import 'package:app_settings/app_settings.dart';
 import 'package:flutter/material.dart';
 import 'package:locallists/features/categories/category_management_screen.dart';
+import 'package:locallists/features/categories/template_management_screen.dart';
 import 'package:locallists/features/settings/pomodoro_settings_screen.dart';
 import 'package:locallists/services/theme_notifier.dart';
 import 'package:provider/provider.dart';
@@ -46,6 +47,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (context) => const CategoryManagementScreen(),
+                  ),
+                );
+              },
+            ),
+          ),
+          // Templates in card with icon and title
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ListTile(
+              leading: Icon(Icons.description_outlined),
+              title: Text('Manage Templates'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const TemplateManagementScreen(),
                   ),
                 );
               },

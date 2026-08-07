@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:locallists/data/task_database_helper.dart';
 import 'package:locallists/utils/theme.dart';
 
 class AddTaskSheet extends StatefulWidget {
@@ -152,6 +153,145 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
     );
   }
 
+  Color get _accent =>
+      widget.isDarkMode ? AppThemes.lightSecondary : AppThemes.darkPrimary;
+
+  // Start a new task from a saved template - fills in title and category.
+  // Due date is intentionally left for the user to set fresh each time.
+  Future<void> _showTemplatePicker() async {
+    final templates = await TaskDatabaseHelper.instance.getAllTemplates();
+    if (!mounted) return;
+
+    if (templates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No templates saved yet')),
+      );
+      return;
+    }
+
+    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Start from template',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ...templates.map((template) {
+                  final category =
+                      widget.categoriesMap[template['category_id']];
+                  return ListTile(
+                    leading: Icon(Icons.description, color: _accent),
+                    title: Text(template['name']),
+                    subtitle: Text(template['title']),
+                    trailing: category != null
+                        ? Icon(
+                            IconData(category['icon'],
+                                fontFamily: 'MaterialIcons'),
+                            color: Color(category['color']),
+                            size: 18,
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(context, template),
+                  );
+                }),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (selected != null && mounted) {
+      setState(() {
+        _taskController.text = selected['title'];
+        selectedCategoryId = selected['category_id'];
+      });
+    }
+  }
+
+  // Save the current title/category as a reusable template.
+  Future<void> _saveAsTemplate() async {
+    if (_taskController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a task title first')),
+      );
+      return;
+    }
+
+    final nameController =
+        TextEditingController(text: _taskController.text.trim());
+
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save as Template'),
+        content: TextField(
+          controller: nameController,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Template name'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () =>
+                Navigator.pop(context, nameController.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (name == null || name.isEmpty || !mounted) return;
+
+    await TaskDatabaseHelper.instance.saveTemplate({
+      'name': name,
+      'title': _taskController.text.trim(),
+      'details': null,
+      'category_id': selectedCategoryId,
+      'subtasks': const [],
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Template saved')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -164,6 +304,24 @@ class _AddTaskSheetState extends State<AddTaskSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (widget.task == null)
+                IconButton(
+                  icon: const Icon(Icons.dashboard_customize_outlined),
+                  tooltip: 'Start from template',
+                  color: _accent,
+                  onPressed: _showTemplatePicker,
+                ),
+              IconButton(
+                icon: const Icon(Icons.bookmark_add_outlined),
+                tooltip: 'Save as template',
+                color: _accent,
+                onPressed: _saveAsTemplate,
+              ),
+            ],
+          ),
           TextField(
             cursorColor: widget.isDarkMode
                 ? AppThemes.lightSecondary

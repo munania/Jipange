@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:locallists/data/task_database_helper.dart';
+import 'package:locallists/features/lists/widgets/recurrence_picker_sheet.dart';
 import 'package:locallists/features/task/task.dart';
 import 'package:locallists/services/notification_service.dart';
 import 'package:locallists/utils/theme.dart' show AppThemes;
@@ -26,10 +27,11 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
   int? position;
   int? selectedCategoryId;
   TaskPriority priority = TaskPriority.none;
+  RecurrenceRule recurrenceRule = RecurrenceRule.none;
   List<Category> categories = [];
   final List<SubtaskItem> subtasks = [];
   final TextEditingController detailsController = TextEditingController();
-  bool isLoading = false;
+  bool isLoading = true;
   bool isSaving = false;
   bool isTaskDone = false;
 
@@ -121,6 +123,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
 
         // Populate category
         selectedCategoryId = taskData['category_id'];
+        recurrenceRule = RecurrenceRule.fromJson(taskData['recurrence_rule']);
         priority = TaskPriority.fromValue(taskData['priority']);
 
         isTaskDone = taskData['done'] == true || taskData['done'] == 1;
@@ -196,6 +199,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
         'position': position,
         'category_id': selectedCategoryId,
         'priority': priority.value,
+        'recurrence_rule': recurrenceRule.toJson(),
         'subtasks': subtasks
             .map((subtask) => {
                   if (subtask.id != null) 'id': subtask.id,
@@ -552,12 +556,76 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
                 setState(() {
                   selectedDate = null;
                   selectedTime = null;
+                  // Repeating without a due date doesn't make sense - clear
+                  // it too so the Repeat pill goes back to disabled/"None".
+                  recurrenceRule = RecurrenceRule.none;
                 });
+                _persistNow();
               },
               child: const Icon(Icons.close, size: 16, color: Colors.grey),
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Future<void> _showRecurrencePicker() async {
+    if (selectedDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Set a due date first to enable repeating')),
+      );
+      return;
+    }
+
+    final result = await showModalBottomSheet<RecurrenceRule>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => RecurrencePickerSheet(
+        current: recurrenceRule,
+        isDarkMode: Theme.of(context).brightness == Brightness.dark,
+      ),
+    );
+
+    if (result != null && mounted) {
+      setState(() => recurrenceRule = result);
+      _persistNow();
+    }
+  }
+
+  Widget _buildRepeatPill() {
+    final enabled = selectedDate != null;
+    final isActive = recurrenceRule.isActive;
+
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.4,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: _buildPill(
+          onTap: _showRecurrencePicker,
+          borderColor: isActive ? _accentColor.withValues(alpha: 0.6) : null,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.repeat,
+                size: 16,
+                color: isActive ? _accentColor : Colors.grey,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isActive ? recurrenceRule.label : 'Repeat',
+                style: TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: isActive ? _accentColor : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -778,6 +846,11 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
                   );
                 }).toList(),
               ),
+
+              const SizedBox(height: 16),
+
+              // Repeat selector (enabled once a due date is set)
+              _buildRepeatPill(),
 
               const SizedBox(height: 24),
 
