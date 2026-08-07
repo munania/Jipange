@@ -20,7 +20,7 @@ class TaskDatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 8, // Bumped to 8 to add tasks.recurrence_rule/recurrence_parent_id
+      version: 9, // Bumped to 9 to add templates/template_subtasks tables
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -169,6 +169,35 @@ class TaskDatabaseHelper {
         }
       }
     }
+
+    if (oldVersion < 9) {
+      try {
+        await db.execute('''
+          CREATE TABLE templates(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            details TEXT,
+            category_id INTEGER
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE template_subtasks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            FOREIGN KEY (template_id) REFERENCES templates (id) ON DELETE CASCADE
+          )
+        ''');
+        if (kDebugMode) {
+          print('Created templates/template_subtasks tables');
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          print('Error creating templates tables (might already exist): $e');
+        }
+      }
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -238,6 +267,27 @@ class TaskDatabaseHelper {
         completed_at TEXT NOT NULL,
         task_id INTEGER,
         FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE SET NULL
+      )
+    ''');
+
+    // Create templates table
+    await db.execute('''
+      CREATE TABLE templates(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        title TEXT NOT NULL,
+        details TEXT,
+        category_id INTEGER
+      )
+    ''');
+
+    // Create template_subtasks table
+    await db.execute('''
+      CREATE TABLE template_subtasks(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates (id) ON DELETE CASCADE
       )
     ''');
   }
@@ -725,6 +775,70 @@ class TaskDatabaseHelper {
   Future<int> clearPomodoroHistory() async {
     final db = await instance.database;
     return await db.delete('pomodoro_sessions');
+  }
+
+  /// Template operations
+
+  // Save a new template with its subtasks (templates are never "updated in
+  // place" from the UI today - only created or deleted - so this only
+  // handles insert, mirroring the simplicity of category CRUD).
+  Future<int> saveTemplate(Map<String, dynamic> template) async {
+    final db = await instance.database;
+    late int templateId;
+
+    await db.transaction((transaction) async {
+      templateId = await transaction.insert('templates', {
+        'name': template['name'],
+        'title': template['title'],
+        'details': template['details'],
+        'category_id': template['category_id'],
+      });
+
+      final subtasks = template['subtasks'] as List<dynamic>? ?? [];
+      for (final subtask in subtasks) {
+        await transaction.insert('template_subtasks', {
+          'template_id': templateId,
+          'title': subtask['title'],
+        });
+      }
+    });
+
+    return templateId;
+  }
+
+  // List all templates (without subtasks - used for the picker/management list)
+  Future<List<Map<String, dynamic>>> getAllTemplates() async {
+    final db = await instance.database;
+    return await db.query('templates', orderBy: 'id DESC');
+  }
+
+  // Get a single template with its subtasks (used when starting a task from it)
+  Future<Map<String, dynamic>?> getTemplateWithSubtasks(int templateId) async {
+    final db = await instance.database;
+
+    final templates = await db.query(
+      'templates',
+      where: 'id = ?',
+      whereArgs: [templateId],
+    );
+    if (templates.isEmpty) return null;
+
+    final subtasks = await db.query(
+      'template_subtasks',
+      where: 'template_id = ?',
+      whereArgs: [templateId],
+    );
+
+    return {
+      ...templates.first,
+      'subtasks': subtasks.map((s) => {'title': s['title']}).toList(),
+    };
+  }
+
+  // Delete a template (template_subtasks cascade via FK)
+  Future<int> deleteTemplate(int templateId) async {
+    final db = await instance.database;
+    return await db.delete('templates', where: 'id = ?', whereArgs: [templateId]);
   }
 
   // Close the database

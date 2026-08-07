@@ -21,10 +21,39 @@ class Homepage extends StatefulWidget {
 
 enum SortOption { custom, dateCreated, dueDate, alphabetical, priority }
 
+// Order matters - matches the swipeable tab order (Today, All, No Due Date).
+enum HomeTab { today, all, noDueDate }
+
+extension on HomeTab {
+  String get label {
+    switch (this) {
+      case HomeTab.today:
+        return 'Today';
+      case HomeTab.all:
+        return 'All';
+      case HomeTab.noDueDate:
+        return 'No Due Date';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case HomeTab.today:
+        return Icons.today_rounded;
+      case HomeTab.all:
+        return Icons.list_alt_rounded;
+      case HomeTab.noDueDate:
+        return Icons.event_busy_rounded;
+    }
+  }
+}
+
 class _HomepageState extends State<Homepage> {
   List<Map<String, dynamic>> userTasks = [];
   Map<int, Map<String, dynamic>> _categoriesMap = {};
-  bool _showCompleted = true;
+  // Auto-hides completed tasks by default so finished work doesn't clutter
+  // the list; the eye icon in the AppBar still lets it be toggled back on.
+  bool _showCompleted = false;
   bool _isSearching = false;
   String _searchQuery = '';
   SortOption _currentSortOption = SortOption.custom;
@@ -33,6 +62,11 @@ class _HomepageState extends State<Homepage> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   List<String> _recentSearches = [];
+
+  // Today / All / No Due Date swipeable tabs
+  HomeTab _selectedTab = HomeTab.today;
+  late final PageController _tabPageController =
+      PageController(initialPage: HomeTab.today.index);
 
   // Bulk multi-select
   bool _selectionMode = false;
@@ -53,7 +87,7 @@ class _HomepageState extends State<Homepage> {
   Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _showCompleted = prefs.getBool('showCompleted') ?? true;
+      _showCompleted = prefs.getBool('showCompleted') ?? false;
     });
     _loadCategories();
     _loadTasks();
@@ -77,6 +111,35 @@ class _HomepageState extends State<Homepage> {
 
   static bool isDarkMode(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark;
+  }
+
+  // Filters the already-loaded (and already search/category/priority
+  // filtered) task list down to what a given tab should show.
+  List<Map<String, dynamic>> _tasksForTab(HomeTab tab) {
+    switch (tab) {
+      case HomeTab.today:
+        final now = DateTime.now();
+        return userTasks.where((t) {
+          if (t['due_date'] == null) return false;
+          final d = DateTime.parse(t['due_date']);
+          return d.year == now.year &&
+              d.month == now.month &&
+              d.day == now.day;
+        }).toList();
+      case HomeTab.noDueDate:
+        return userTasks.where((t) => t['due_date'] == null).toList();
+      case HomeTab.all:
+        return userTasks;
+    }
+  }
+
+  void _onTabTapped(HomeTab tab) {
+    setState(() => _selectedTab = tab);
+    _tabPageController.animateToPage(
+      tab.index,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   // Load tasks from the database
@@ -487,6 +550,255 @@ class _HomepageState extends State<Homepage> {
     _exitSelectionMode();
   }
 
+  // Segmented Today/All/No Due Date control with a sliding colored
+  // indicator, matching the style used elsewhere in the app (e.g. the
+  // Pomodoro analytics period tabs).
+  Widget _buildHomeTabBar(bool isDarkMode, Color accent) {
+    final trackColor =
+        isDarkMode ? const Color(0xFF22252C) : const Color(0xFFE9EAF0);
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: trackColor,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = constraints.maxWidth / HomeTab.values.length;
+          final selectedIndex = _selectedTab.index;
+          return Stack(
+            children: [
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeOutCubic,
+                left: tabWidth * selectedIndex,
+                width: tabWidth,
+                top: 0,
+                bottom: 0,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: accent.withValues(alpha: 0.4),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Row(
+                children: HomeTab.values.map((tab) {
+                  final isSelected = tab == _selectedTab;
+                  return Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => _onTabTapped(tab),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              tab.icon,
+                              size: 18,
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDarkMode
+                                      ? Colors.grey[400]
+                                      : Colors.grey[600]),
+                            ),
+                            const SizedBox(height: 3),
+                            AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 220),
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: isSelected
+                                    ? Colors.white
+                                    : (isDarkMode
+                                        ? Colors.grey[400]
+                                        : Colors.grey[600]),
+                              ),
+                              child: Text(tab.label, textAlign: TextAlign.center),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _emptyTabMessage(HomeTab tab, bool isDarkMode) {
+    String message;
+    IconData icon;
+    switch (tab) {
+      case HomeTab.today:
+        message = 'Nothing due today. Enjoy the breathing room.';
+        icon = Icons.wb_sunny_outlined;
+        break;
+      case HomeTab.noDueDate:
+        message = 'No open-ended tasks right now.';
+        icon = Icons.event_busy_outlined;
+        break;
+      case HomeTab.all:
+        message = 'No tasks yet - tap + to add one.';
+        icon = Icons.checklist_rtl;
+        break;
+    }
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 40,
+                color: isDarkMode
+                    ? AppThemes.darkTextSecondary
+                    : AppThemes.lightTextSecondary),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isDarkMode
+                    ? AppThemes.darkTextSecondary
+                    : AppThemes.lightTextSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTaskListForTab(HomeTab tab, bool isDarkMode) {
+    final tasksForThisTab = _tasksForTab(tab);
+
+    if (tasksForThisTab.isEmpty) {
+      return _emptyTabMessage(tab, isDarkMode);
+    }
+
+    return ReorderableListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+      itemCount: tasksForThisTab.length,
+      itemBuilder: (context, index) {
+        final task = tasksForThisTab[index];
+        final taskId = task['id'] as int;
+        return TaskListItem(
+          key: ValueKey(taskId),
+          task: task,
+          categoriesMap: _categoriesMap,
+          isDarkMode: isDarkMode,
+          selectionMode: _selectionMode,
+          isSelected: _selectedTaskIds.contains(taskId),
+          onLongPress: () => _enterSelectionMode(taskId),
+          onSelectToggle: () => _toggleTaskSelection(taskId),
+          onDismiss: (direction) async {
+            if (direction == DismissDirection.endToStart) {
+              if (!context.mounted) return false;
+
+              final bool? shouldDelete = await showDialog<bool>(
+                context: context,
+                builder: (BuildContext context) => AlertDialog(
+                  title: const Text('Delete Task'),
+                  content: const Text(
+                      'Are you sure you want to delete this task?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text(
+                        'Cancel',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Delete',
+                          style: TextStyle(color: Colors.red)),
+                    ),
+                  ],
+                ),
+              );
+
+              if (shouldDelete == true) {
+                if (!context.mounted) return false;
+                await _deleteTask(taskId);
+                return true;
+              }
+            }
+            return false;
+          },
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => TaskDetails(
+                  taskTitle: task['title'],
+                  taskId: taskId,
+                ),
+              ),
+            );
+            _loadCategories();
+            _loadTasks();
+          },
+          onStatusToggle: () => _updateTaskStatus(taskId, !task['done']),
+          onEdit: () => _showAddTaskBottomSheet(task: task),
+        );
+      },
+      onReorderItem: (int oldIndex, int newIndex) {
+        // Reordering only makes sense on the unfiltered "All" tab - the
+        // custom `position` ordering is global, so reordering within a
+        // date-filtered subset (Today/No Due Date) would corrupt it.
+        if (tab != HomeTab.all ||
+            !_showCompleted ||
+            _currentSortOption != SortOption.custom ||
+            _selectedCategoryIds.isNotEmpty ||
+            _selectedPriorities.isNotEmpty ||
+            _selectionMode ||
+            _searchQuery.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'Switch to the All tab (with no filters/search) to reorder')),
+          );
+          return;
+        }
+
+        setState(() {
+          if (oldIndex < newIndex) {
+            newIndex -= 1;
+          }
+
+          final Map<String, dynamic> movedTask =
+              userTasks.removeAt(oldIndex);
+          userTasks.insert(newIndex, movedTask);
+
+          final updatedTasks = userTasks.asMap().entries.map((e) {
+            return {
+              'id': e.value['id'],
+              'position': e.key,
+            };
+          }).toList();
+
+          TaskDatabaseHelper.instance.updateTaskPositions(updatedTasks);
+        });
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -606,171 +918,63 @@ class _HomepageState extends State<Homepage> {
                       }),
                 ],
               ),
-        body: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.only(
-                left: 16.0, right: 16, top: 16, bottom: 100),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (showRecentSearches) ...[
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Recent searches',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      TextButton(
-                        onPressed: _clearRecentSearches,
-                        child: const Text('Clear'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: _recentSearches.map((query) {
-                      return InputChip(
-                        avatar: const Icon(Icons.history, size: 16),
-                        label: Text(query),
-                        onPressed: () => _applyRecentSearch(query),
-                        onDeleted: () => _removeRecentSearch(query),
-                        deleteIconColor: Colors.grey,
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-                Text(
-                  'Your Tasks',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 16),
-                ReorderableListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: userTasks.length,
-                  itemBuilder: (context, index) {
-                    final task = userTasks[index];
-                    final taskId = task['id'] as int;
-                    return TaskListItem(
-                      key: ValueKey(taskId),
-                      task: task,
-                      categoriesMap: _categoriesMap,
-                      isDarkMode: isDarkMode,
-                      selectionMode: _selectionMode,
-                      isSelected: _selectedTaskIds.contains(taskId),
-                      onLongPress: () => _enterSelectionMode(taskId),
-                      onSelectToggle: () => _toggleTaskSelection(taskId),
-                      onDismiss: (direction) async {
-                        if (direction == DismissDirection.endToStart) {
-                          // Store the context's mounted status before the async gap
-                          if (!context.mounted) return false;
-
-                          // Show dialog and await the result
-                          final bool? shouldDelete = await showDialog<bool>(
-                            context: context,
-                            builder: (BuildContext context) => AlertDialog(
-                              title: const Text('Delete Task'),
-                              content: const Text(
-                                  'Are you sure you want to delete this task?'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, false),
-                                  child: const Text(
-                                    'Cancel',
-                                    style: TextStyle(color: Colors.grey),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, true),
-                                  child: const Text('Delete',
-                                      style: TextStyle(color: Colors.red)),
-                                ),
-                              ],
-                            ),
-                          );
-
-                          if (shouldDelete == true) {
-                            // Check if context is still mounted before proceeding
-                            if (!context.mounted) return false;
-                            await _deleteTask(taskId);
-                            return true; // Confirm delete
-                          }
-                        }
-                        return false;
-                      },
-                      onTap: () async {
-                        await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => TaskDetails(
-                              taskTitle: task['title'],
-                              taskId: taskId,
-                            ),
-                          ),
+        body: Column(
+          children: [
+            if (showRecentSearches)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Recent searches',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleSmall
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        TextButton(
+                          onPressed: _clearRecentSearches,
+                          child: const Text('Clear'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _recentSearches.map((query) {
+                        return InputChip(
+                          avatar: const Icon(Icons.history, size: 16),
+                          label: Text(query),
+                          onPressed: () => _applyRecentSearch(query),
+                          onDeleted: () => _removeRecentSearch(query),
+                          deleteIconColor: Colors.grey,
                         );
-                        // Reload categories and tasks after returning from TaskDetails
-                        _loadCategories();
-                        _loadTasks();
-                      },
-                      onStatusToggle: () =>
-                          _updateTaskStatus(taskId, !task['done']),
-                      onEdit: () => _showAddTaskBottomSheet(task: task),
-                    );
-                  },
-                  onReorderItem: (int oldIndex, int newIndex) {
-                    // Prevent reordering if filtering is active or sorting is not custom or searching
-                    if (!_showCompleted ||
-                        _currentSortOption != SortOption.custom ||
-                        _selectedCategoryIds.isNotEmpty ||
-                        _selectedPriorities.isNotEmpty ||
-                        _selectionMode ||
-                        _searchQuery.isNotEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text(
-                                'Cannot reorder when filtered, sorted, or searching')),
-                      );
-                      return;
-                    }
-
-                    setState(() {
-                      // Adjust newIndex if moving an item with a lower index to a higher index
-                      if (oldIndex < newIndex) {
-                        newIndex -= 1;
-                      }
-
-                      // Remove the item from the old index
-                      final Map<String, dynamic> movedTask =
-                          userTasks.removeAt(oldIndex);
-
-                      // Insert the item at the new index
-                      userTasks.insert(newIndex, movedTask);
-
-                      // Update positions in database
-                      final updatedTasks = userTasks.asMap().entries.map((e) {
-                        return {
-                          'id': e.value['id'],
-                          'position': e.key,
-                        };
-                      }).toList();
-
-                      TaskDatabaseHelper.instance
-                          .updateTaskPositions(updatedTasks);
-                    });
-                  },
+                      }).toList(),
+                    ),
+                  ],
                 ),
-              ],
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: _buildHomeTabBar(isDarkMode, accent),
             ),
-          ),
+            Expanded(
+              child: PageView(
+                controller: _tabPageController,
+                onPageChanged: (index) {
+                  setState(() => _selectedTab = HomeTab.values[index]);
+                },
+                children: HomeTab.values
+                    .map((tab) => _buildTaskListForTab(tab, isDarkMode))
+                    .toList(),
+              ),
+            ),
+          ],
         ),
         floatingActionButton: _selectionMode
             ? null
@@ -788,11 +992,7 @@ class _HomepageState extends State<Homepage> {
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();
-    // Note: intentionally NOT closing TaskDatabaseHelper here anymore.
-    // Homepage now lives inside MainNavigation's IndexedStack alongside the
-    // Pomodoro tab, and both share the same TaskDatabaseHelper singleton, so
-    // closing it here could break Pomodoro session storage. The database
-    // connection is left open for the lifetime of the app.
+    _tabPageController.dispose();
     super.dispose();
   }
 }

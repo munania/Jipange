@@ -6,13 +6,42 @@ import 'package:flutter/material.dart';
 /// (e.g. '{"type":"weekly","interval":1}'), null/none meaning "doesn't repeat".
 enum RecurrenceType { none, daily, weekly, monthly, custom }
 
+/// Unit used by a "custom" recurrence interval.
+enum RecurrenceUnit {
+  minutes,
+  hours,
+  days,
+  weeks;
+
+  String label(int interval) {
+    final plural = interval == 1 ? '' : 's';
+    switch (this) {
+      case RecurrenceUnit.minutes:
+        return 'minute$plural';
+      case RecurrenceUnit.hours:
+        return 'hour$plural';
+      case RecurrenceUnit.days:
+        return 'day$plural';
+      case RecurrenceUnit.weeks:
+        return 'week$plural';
+    }
+  }
+}
+
 class RecurrenceRule {
   final RecurrenceType type;
-  // Used by "custom" (every N days). Daily/weekly/monthly always step by 1
-  // of their own unit.
+  // Magnitude for "custom" (e.g. 30 for "every 30 minutes"). Daily/weekly/
+  // monthly always step by 1 of their own unit and ignore this.
   final int interval;
+  // Unit for "custom" only - lets custom intervals go down to minutes/hours,
+  // not just whole days.
+  final RecurrenceUnit unit;
 
-  const RecurrenceRule({required this.type, this.interval = 1});
+  const RecurrenceRule({
+    required this.type,
+    this.interval = 1,
+    this.unit = RecurrenceUnit.days,
+  });
 
   static const none = RecurrenceRule(type: RecurrenceType.none);
 
@@ -29,14 +58,18 @@ class RecurrenceRule {
       case RecurrenceType.monthly:
         return 'Monthly';
       case RecurrenceType.custom:
-        return 'Every $interval day${interval == 1 ? '' : 's'}';
+        return 'Every $interval ${unit.label(interval)}';
     }
   }
 
   /// Null when the rule is "none" (matches how it's stored: no row value).
   String? toJson() {
     if (type == RecurrenceType.none) return null;
-    return jsonEncode({'type': type.name, 'interval': interval});
+    return jsonEncode({
+      'type': type.name,
+      'interval': interval,
+      'unit': unit.name,
+    });
   }
 
   static RecurrenceRule fromJson(String? raw) {
@@ -48,7 +81,11 @@ class RecurrenceRule {
         orElse: () => RecurrenceType.none,
       );
       final interval = (map['interval'] as num?)?.toInt() ?? 1;
-      return RecurrenceRule(type: type, interval: interval);
+      final unit = RecurrenceUnit.values.firstWhere(
+        (u) => u.name == map['unit'],
+        orElse: () => RecurrenceUnit.days,
+      );
+      return RecurrenceRule(type: type, interval: interval, unit: unit);
     } catch (_) {
       return RecurrenceRule.none;
     }
@@ -70,7 +107,16 @@ class RecurrenceRule {
         return DateTime(from.year, from.month + 1, from.day, from.hour,
             from.minute);
       case RecurrenceType.custom:
-        return from.add(Duration(days: interval));
+        switch (unit) {
+          case RecurrenceUnit.minutes:
+            return from.add(Duration(minutes: interval));
+          case RecurrenceUnit.hours:
+            return from.add(Duration(hours: interval));
+          case RecurrenceUnit.days:
+            return from.add(Duration(days: interval));
+          case RecurrenceUnit.weeks:
+            return from.add(Duration(days: interval * 7));
+        }
     }
   }
 }

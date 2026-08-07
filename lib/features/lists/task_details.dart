@@ -31,7 +31,7 @@ class _TaskDetailsState extends State<TaskDetails> with WidgetsBindingObserver {
   List<Category> categories = [];
   final List<SubtaskItem> subtasks = [];
   final TextEditingController detailsController = TextEditingController();
-  bool isLoading = false;
+  bool isLoading = true;
   bool isSaving = false;
   bool isTaskDone = false;
 
